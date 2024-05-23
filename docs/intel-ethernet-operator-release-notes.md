@@ -29,11 +29,11 @@ This document provides high-level system features, issues, and limitations infor
 | v23.07-redhat-cert | July     2023 | OCP 4.9, 4.10, 4.11, 4.12, 4.13                | OCP 4.12.21, 4.13.3          |
 | v23.08             | August   2023 | K8S v1.25.3                                    | K8S v1.25.3                  |
 | v23.08-operatorhub | November 2023 | K8S >v1.21                                     | K8S v1.25.3                  |
-| v24.04             | April    2024 | K8S >v1.21, OCP >4.11                          | K8S v1.29.0, OCP 4.14.7      |
+| v24.05             | April    2024 | K8S >v1.21, OCP >4.11                          | K8S v1.29.0, OCP 4.14.7      |
 
 # Features for Release
 
-***v24.04***
+***v24.05***
 
 - Add firmware updates support for 700 series (FVL) NICs.
 - Add operator Helm Chart.
@@ -96,7 +96,7 @@ This document provides high-level system features, issues, and limitations infor
 
 # Changes to Existing Features
 
-***v24.04***
+***v24.05***
 
 - Remove sriov-network-operator as dependency to intel-ethernet-operator.
 - Change EthernetClusterConfig API -> `deviceSelector` fields are now arrays of strings instead of strings. This change
@@ -149,14 +149,14 @@ None
 
 # Fixed Issues
 
-***v24.04***
+***v24.05***
 
 - Change DeepDerivative to DeepEqual in EthernetClusterConfig creation -> DeepDerivative ignores fields that are not
   present in new ECC so when user applies empty ECC or ECC with smaller amount of fields it's treated as equal to
   older ECC. DeepEqual checks all fields of ECC spec.
 - Fix logic that checks if reboot is needed -> There might be case when reboot is needed after updating first device
   from the queue, but when second device from queue is updated and reboot is not requested, reboot requested by first
-  device will be overwritten. This is fixed in v24.04.
+  device will be overwritten. This is fixed in v24.05.
 
 ***v22.11***
 
@@ -234,7 +234,7 @@ None
 
 # Supported Operating Systems
 
-***v24.04***
+***v24.05***
 
 - K8S >v1.21 (tested on K8S v1.29, Ubuntu 22.04 - 6.5.0-25-generic in-tree ICE driver and 1.9.11 OOT ICE driver)
 - OCP >4.11 (tested on 4.14.7, Red Hat Enterprise Linux CoreOS 414.92.202312132152-0 - 5.14.0-284.45.1.el9_2.x86_64
