@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -1146,7 +1146,7 @@ func TestValidateCreate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			policy1.Spec.Rules = tt.rules
 
-			if err := policy1.ValidateCreate(); (err != nil) != tt.wantErr {
+			if _, err := policy1.ValidateCreate(); (err != nil) != tt.wantErr {
 				t.Errorf("NodeFlowConfig.ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -1156,7 +1156,7 @@ func TestValidateCreate(t *testing.T) {
 func TestValidateUpdate(t *testing.T) {
 	policy1.Spec.Rules = validUnsupportedItem
 	t.Run("Updating NodeFlowConfigSpec with valid but not supported Item", func(t *testing.T) {
-		if err := policy1.ValidateUpdate(old); (err != nil) != false {
+		if _, err := policy1.ValidateUpdate(old); (err != nil) != false {
 			t.Errorf("NodeFlowConfig.ValidateUpdate() error = %v, wantErr %v", err, false)
 		}
 	})
@@ -1164,7 +1164,7 @@ func TestValidateUpdate(t *testing.T) {
 
 func TestValidateDelete(t *testing.T) {
 	t.Run("Deleting NodeFlowConfigSpec with valid but not supported Item", func(t *testing.T) {
-		if err := policy1.ValidateDelete(); (err != nil) != false {
+		if _, err := policy1.ValidateDelete(); (err != nil) != false {
 			t.Errorf("NodeFlowConfig.ValidateUpdate() error = %v, wantErr %v", err, false)
 		}
 	})
@@ -1224,7 +1224,7 @@ func TestValidateCreateFuzz(t *testing.T) {
 	for i := 0; i < fuzzIteration; i++ {
 		f.Fuzz(&flowConfig)
 
-		_ = flowConfig.ValidateCreate()
+		_, _ = flowConfig.ValidateCreate()
 	}
 }
 

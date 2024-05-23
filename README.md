@@ -1,6 +1,6 @@
 ```text
 SPDX-License-Identifier: Apache-2.0
-Copyright (c) 2020-2023 Intel Corporation
+Copyright (c) 2020-2024 Intel Corporation
 ```
 
 Intel Ethernet Operator:

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -137,7 +137,7 @@ var _ = Describe("ClusterFlowConfig Webhook tests", func() {
 
 	Context("verify ValidateCreate()", func() {
 		DescribeTable("verify ValidateCreate()", func(clusterFlowConfigObject *ClusterFlowConfig, expectError bool, message string) {
-			err := clusterFlowConfigObject.ValidateCreate()
+			_, err := clusterFlowConfigObject.ValidateCreate()
 			if expectError {
 				Expect(err).ShouldNot(BeNil())
 				Expect(err.Error()).Should(ContainSubstring(message))
@@ -185,7 +185,7 @@ var _ = Describe("ClusterFlowConfig Webhook tests", func() {
 	Context("verify ValidateUpdate()", func() {
 		DescribeTable("verify ValidateUpdate()", func(clusterFlowConfigObject *ClusterFlowConfig, expectError bool, message string) {
 			oldObj := &runtime.Unknown{}
-			err := clusterFlowConfigObject.ValidateUpdate(oldObj)
+			_, err := clusterFlowConfigObject.ValidateUpdate(oldObj)
 			if expectError {
 				Expect(err).ShouldNot(BeNil())
 				Expect(err.Error()).Should(ContainSubstring(message))
@@ -218,7 +218,8 @@ var _ = Describe("ClusterFlowConfig Webhook tests", func() {
 	Context("validate delete", func() {
 		It("empty CR", func() {
 			obj := getClusterFlowConfig()
-			Expect(obj.ValidateDelete()).To(BeNil())
+			_, err := obj.ValidateDelete()
+			Expect(err).To(BeNil())
 		})
 	})
 })
@@ -274,7 +275,7 @@ func TestClusterValidateCreateFuzz(t *testing.T) {
 	t.Logf("fuzzing ClusterFlowConfig for: %d\n", fuzzIteration)
 	for i := 0; i < fuzzIteration; i++ {
 		f.Fuzz(&clusterFlowConfig)
-		_ = clusterFlowConfig.ValidateCreate()
+		_, _ = clusterFlowConfig.ValidateCreate()
 	}
 }
 

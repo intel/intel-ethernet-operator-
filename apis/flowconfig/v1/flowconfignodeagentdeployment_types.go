@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -32,7 +32,7 @@ type FlowConfigNodeAgentDeploymentStatus struct {
 //+kubebuilder:subresource:status
 
 // FlowConfigNodeAgentDeployment is the Schema for the flowconfignodeagentdeployments API
-//+operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,flowconfig-daemon}}
+// +operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,flowconfig-daemon}}
 type FlowConfigNodeAgentDeployment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

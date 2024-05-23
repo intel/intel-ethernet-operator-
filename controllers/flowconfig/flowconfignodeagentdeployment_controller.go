@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package flowconfig
 
@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	flowconfigv1 "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/apis/flowconfig/v1"
 	"github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/pkg/utils"
@@ -271,7 +270,7 @@ func (r *FlowConfigNodeAgentDeploymentReconciler) getNodeResources(node *corev1.
 	return 0
 }
 
-func (r *FlowConfigNodeAgentDeploymentReconciler) mapNodesToRequests(object client.Object) []reconcile.Request {
+func (r *FlowConfigNodeAgentDeploymentReconciler) mapNodesToRequests(ctx context.Context, object client.Object) []reconcile.Request {
 	resLogger := r.Log.WithName("mapNodesToRequests")
 
 	// get all instances of CRs and create for each an event
@@ -439,7 +438,7 @@ func (r *FlowConfigNodeAgentDeploymentReconciler) SetupWithManager(mgr ctrl.Mana
 		For(&flowconfigv1.FlowConfigNodeAgentDeployment{}).
 		Owns(&corev1.Pod{}).
 		Watches(
-			&source.Kind{Type: &corev1.Node{}},
+			&corev1.Node{},
 			handler.EnqueueRequestsFromMapFunc(r.mapNodesToRequests),
 		).
 		WithEventFilter(r.getNodeFilterPredicates()).

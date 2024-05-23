@@ -1,0 +1,130 @@
+{{/*
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+*/}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intel-ethernet-operator-controller-manager
+  labels:
+    {{- include "intel-ethernet-operator.labels" . | nindent 4 }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      {{- include "intel-ethernet-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        {{- include "intel-ethernet-operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "intel-ethernet-operator.serviceAccount" . }}
+      containers:
+        - name: manager
+          command: 
+          - /manager
+          args:
+          - --leader-elect
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+              - all
+          image: "{{ .Values.image.repository }}/intel-ethernet-operator-manager:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+          - name: ETHERNET_CVL_NODE_LABEL
+            value: ethernet.intel.com/intel-ethernet-cvl-present
+          - name: ETHERNET_FVL_NODE_LABEL
+            value: ethernet.intel.com/intel-ethernet-fvl-present
+          - name: ETHERNET_NODE_LABELER_IMAGE
+            value: "{{ .Values.image.repository }}/intel-ethernet-operator-labeler:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          - name: ETHERNET_DAEMON_IMAGE
+            value: "{{ .Values.image.repository }}/intel-ethernet-operator-daemon:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          - name: ETHERNET_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: ENABLE_WEBHOOK_MTLS
+            valueFrom:
+              configMapKeyRef:
+                key: enable-webhook-mtls
+                name: {{ include "intel-ethernet-operator.mTLSWebhookConfig" . }}
+                optional: true
+          {{ if .Values.proxy.httpProxy }}
+          - name: HTTP_PROXY
+            value: {{ .Values.proxy.httpProxy }}
+          {{- end }}
+          {{ if .Values.proxy.httpsProxy }}
+          - name: HTTPS_PROXY
+            value: {{ .Values.proxy.httpsProxy }}
+          {{- end }}
+          {{ if .Values.proxy.noProxy }}
+          - name: NO_PROXY
+            value: {{ .Values.proxy.noProxy }}
+          {{- end }}
+          {{ if not .Values.webhookServerConfiguration.enable }}
+          - name: ENABLE_WEBHOOKS
+            value: "false"
+          {{- end }}
+          ports:
+          - containerPort: 9443
+            name: webhook-server
+            protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+          - mountPath: /tmp/k8s-webhook-server/serving-certs
+            name: cert
+            readOnly: true
+          - mountPath: /etc/ieo-webhook/pki/
+            name: webhook-ca
+      terminationGracePeriodSeconds: 10
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            {{- include "intel-ethernet-operator.selectorLabels" . | nindent 12 }}
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+      volumes:
+      - name: cert
+        secret:
+          # If Webhooks are disabled, this secret won't be created by Helm deployment.
+          # In OLM deployment, webhook certs, and hence this secret will be created
+          # anyway, even if Webhooks are disabled.
+          optional: true
+          defaultMode: 420
+          secretName: {{ include "intel-ethernet-operator.webhookCertsSecret" . }}
+      - name: webhook-ca
+        secret:
+          optional: true
+          secretName: {{ include "intel-ethernet-operator.mTLSWebhookCASecret" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

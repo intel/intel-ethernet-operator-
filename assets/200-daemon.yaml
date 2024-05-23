@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 apiVersion: v1
 kind: ConfigMap
@@ -104,16 +104,20 @@ data:
           app: fwddp-daemon
       template:
         metadata:
-          # Mark this pod as a critical add-on; when enabled, the critical add-on scheduler
-          # reserves resources for critical add-on pods so that they can be rescheduled after
-          # a failure.  This annotation works in tandem with the toleration below.
-          annotations:
-            scheduler.alpha.kubernetes.io/critical-pod: ""
           labels:
             app: fwddp-daemon
         spec:
-          nodeSelector:
-            {{ .ETHERNET_NODE_LABEL }}: ""
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: "ethernet.intel.com/intel-ethernet-cvl-present"
+                    operator: Exists
+                - matchExpressions:
+                  - key: "ethernet.intel.com/intel-ethernet-fvl-present"
+                    operator: Exists
+          priorityClassName: system-node-critical
           serviceAccount: fwddp-daemon
           serviceAccountName: fwddp-daemon
           hostPID: true
@@ -136,8 +140,8 @@ data:
                   readOnly: true
                 - name: run-volume
                   mountPath: /run
-                - name: nvmupdate-volume
-                  mountPath: /tmp
+                - name: firmware-binaries
+                  mountPath: /run/nvmupdate
                 - name: binaries
                   mountPath: /host/bin/
                   readOnly: true
@@ -162,6 +166,10 @@ data:
                   readOnly: true
                 - name: firmware-ddp
                   mountPath: /lib/firmware
+                - name: ddp-discover
+                  mountPath: /host/discover-ddp
+                  readOnly: true
+                  type: Directory
               env:
                 {{ if ne .NO_PROXY "" }}
                 - name: NO_PROXY
@@ -207,9 +215,9 @@ data:
             - name: run-systemd
               hostPath:
                 path: /run/systemd
-            - name: nvmupdate-volume
+            - name: firmware-binaries
               hostPath:
-                path: /tmp/
+                path: /run/nvmupdate
             - name: run-dbus
               hostPath:
                 path: /run/dbus
@@ -220,7 +228,7 @@ data:
               emptyDir: {}
             - name: config-volume
               configMap:
-                name: supported-clv-devices
+                name: supported-cvl-devices
             - name: libmodules
               hostPath:
                 path: /lib/modules
@@ -233,3 +241,6 @@ data:
             - name: firmware-ddp
               hostPath:
                 path: {{ .FW_HOST_PATH }}
+            - name: ddp-discover
+              hostPath:
+                path: /lib/firmware/intel/ice/

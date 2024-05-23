@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 apiVersion: v1
 kind: ConfigMap
@@ -12,7 +12,7 @@ data:
     apiVersion: v1
     kind: ConfigMap
     metadata:
-      name: supported-clv-devices
+      name: supported-cvl-devices
       namespace: {{ .ETHERNET_NAMESPACE }}
     immutable: false
     data:
@@ -29,19 +29,22 @@ data:
             },
             "E810-XXVDA4": {
                 "VendorID": "8086", "Class": "02", "SubClass": "00", "DeviceID": "1593"
+            },
+            "X710-SFP+": {
+                "VendorID": "8086", "Class": "02", "SubClass": "00", "DeviceID": "1572"
             }
         }
   serviceAccount: |
     apiVersion: v1
     kind: ServiceAccount
     metadata:
-      name: clv-discovery
+      name: cvl-discovery
       namespace: "{{ .ETHERNET_NAMESPACE }}"
   clusterRole: |
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
-      name: clv-discovery
+      name: cvl-discovery
     rules:
       - apiGroups: [""]
         resources: ["nodes"]
@@ -50,43 +53,40 @@ data:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
-      name: clv-discovery
+      name: cvl-discovery
     roleRef:
       apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole
-      name: clv-discovery
-      namespace: "{{ .ETHERNET_NAMESPACE }}"
+      name: cvl-discovery
     subjects:
       - kind: ServiceAccount
-        name: clv-discovery
+        name: cvl-discovery
         namespace: "{{ .ETHERNET_NAMESPACE }}"
-    userNames:
-      - system:serviceaccount:{{ .ETHERNET_NAMESPACE }}:clv-discovery
   daemonSet: |
     apiVersion: apps/v1
     kind: DaemonSet
     metadata:
       labels:
-        app: clv-discovery
-      name: clv-discovery
+        app: cvl-discovery
+      name: cvl-discovery
       namespace: {{ .ETHERNET_NAMESPACE }}
     spec:
       minReadySeconds: 10
       selector:
         matchLabels:
-          app: clv-discovery
+          app: cvl-discovery
       template:
         metadata:
           labels:
-            app: clv-discovery
-          name: clv-discovery
+            app: cvl-discovery
+          name: cvl-discovery
         spec:
-          serviceAccount: clv-discovery
-          serviceAccountName: clv-discovery
+          serviceAccount: cvl-discovery
+          serviceAccountName: cvl-discovery
           containers:
             - image: {{ .ETHERNET_NODE_LABELER_IMAGE }}
               imagePullPolicy: IfNotPresent
-              name: clv-discovery
+              name: cvl-discovery
               securityContext:
                 readOnlyRootFilesystem: true
               volumeMounts:
@@ -99,9 +99,11 @@ data:
                   valueFrom:
                     fieldRef:
                       fieldPath: spec.nodeName
-                - name: NODELABEL
-                  value: "{{ .ETHERNET_NODE_LABEL }}"
+                - name: CVLLABEL
+                  value: "ethernet.intel.com/intel-ethernet-cvl-present"
+                - name: FVLLABEL
+                  value: "ethernet.intel.com/intel-ethernet-fvl-present"
           volumes:
             - name: config-volume
               configMap:
-                name: supported-clv-devices
+                name: supported-cvl-devices

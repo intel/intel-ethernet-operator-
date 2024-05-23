@@ -1,17 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
+import "reflect"
+
 func (ds DeviceSelector) Matches(d Device) bool {
-	if ds.VendorID != "" && ds.VendorID != d.VendorID {
-		return false
+	// if deviceSelector is empty, update all devices on node
+	if reflect.DeepEqual(ds, DeviceSelector{}) {
+		return true
 	}
-	if ds.PCIAddress != "" && ds.PCIAddress != d.PCIAddress {
-		return false
+
+	match := false
+	for _, vendorId := range ds.VendorIDs {
+		if vendorId != "" && vendorId == d.VendorID {
+			match = true
+			break
+		}
 	}
-	if ds.DeviceID != "" && ds.DeviceID != d.DeviceID {
-		return false
+	for _, deviceId := range ds.DeviceIDs {
+		if deviceId != "" && deviceId == d.DeviceID {
+			match = true
+			break
+		}
 	}
-	return true
+	for _, pciAddress := range ds.PCIAddresses {
+		if pciAddress != "" && pciAddress == PciAddress(d.PCIAddress) {
+			match = true
+			break
+		}
+	}
+
+	return match
 }

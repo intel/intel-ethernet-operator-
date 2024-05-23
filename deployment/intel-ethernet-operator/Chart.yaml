@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+
+apiVersion: v2
+name: intel-ethernet-operator
+description: |
+  The role of the Intel Ethernet Operator is to orchestrate and manage the configuration of the capabilities exposed
+  by the Intel E810 Series network interface cards (NICs). The operator is a state machine which will configure certain
+  functions of the card and then monitor the status and act autonomously based on the user interaction.
+type: application
+version: 1.0.0
+appVersion: "2.0.0"
+kubeVersion: '>= 1.21.0'
+keywords:
+  - CLV
+  - E810
+  - DDP
+  - Firmware
+  - Update
+  - SR-IOV
+home: https://github.com/intel/intel-ethernet-operator
+sources:
+  - https://github.com/intel/intel-ethernet-operator

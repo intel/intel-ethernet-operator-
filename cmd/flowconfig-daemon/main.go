@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package main
 
@@ -12,8 +12,11 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	flowconfigv1 "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/apis/flowconfig/v1"
 	flowconfigctlr "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/controllers/flowconfig"
@@ -46,10 +49,17 @@ func main() {
 
 	namespace := os.Getenv("OPERATOR_NAMESPACE")
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		LeaderElection:     enableLeaderElection,
-		Namespace:          namespace,
+		NewCache: func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
+			opts.DefaultNamespaces = map[string]cache.Config{
+				namespace: {},
+			}
+			return cache.New(config, opts)
+		},
+		Scheme:         scheme,
+		LeaderElection: enableLeaderElection,
+		Metrics: server.Options{
+			BindAddress: metricsAddr,
+		},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

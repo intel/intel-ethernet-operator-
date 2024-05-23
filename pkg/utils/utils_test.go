@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package utils
 
@@ -517,7 +517,7 @@ var _ = Describe("Utils", func() {
 			Expect(err).ToNot(HaveOccurred())
 			defer os.RemoveAll(dir)
 
-			err = UnpackDDPArchive(ddpArchive, dir, log)
+			err = UnpackDDPZipArchive(ddpArchive, dir, log)
 			Expect(err).ToNot(HaveOccurred())
 
 			files, err := os.ReadDir(dir)
@@ -551,7 +551,7 @@ var _ = Describe("Utils", func() {
 			Expect(err).ToNot(HaveOccurred())
 			defer os.RemoveAll(dir)
 
-			err = UnpackDDPArchive(ddpArchive, dir, log)
+			err = UnpackDDPZipArchive(ddpArchive, dir, log)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal("unexpected number of DDP archives"))
 		})

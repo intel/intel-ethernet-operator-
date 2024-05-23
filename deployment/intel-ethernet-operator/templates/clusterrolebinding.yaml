@@ -1,0 +1,17 @@
+{{/*
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+*/}}
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "intel-ethernet-operator.clusterRoleBinding" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "intel-ethernet-operator.clusterRole" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "intel-ethernet-operator.serviceAccount" . }}
+    namespace: {{ .Release.Namespace }}

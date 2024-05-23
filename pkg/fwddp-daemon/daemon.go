@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package daemon
 
@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/x509"
 	"net/http"
+	"path/filepath"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -33,18 +34,21 @@ import (
 )
 
 const (
-	requeueAfter = 15 * time.Minute
+	requeueAfter = 5 * time.Minute
 )
 
 var (
-	getInventory = GetInventory
-	execCmd      = utils.ExecCmd
+	getInventory    = GetInventory
+	getDDPsFromHost = GetDDPsFromHost
+	execCmd         = utils.ExecCmd
 
-	downloadFile     = utils.DownloadFile
-	untarFile        = utils.Untar
-	unpackDDPArchive = utils.UnpackDDPArchive
+	downloadFile        = utils.DownloadFile
+	untarFile           = utils.Untar
+	unpackDDPZipArchive = utils.UnpackDDPZipArchive
+	unpackDDPXZArchive  = utils.UnpackDDPXZArchive
 
-	artifactsFolder  = "/tmp/nvmupdate"
+	artifactsFolder  = "/run/artifacts"
+	firmwareFolder   = "/run/nvmupdate"
 	compatMapPath    = "./devices.json"
 	compatibilityMap *CompatibilityMap
 )
@@ -225,7 +229,10 @@ func (r *NodeConfigReconciler) updateStatus(nc *ethernetv1.EthernetNodeConfig, c
 			log.Error(err, "failed to obtain inventory for the node")
 			return err
 		}
-		nodeStatus := ethernetv1.EthernetNodeConfigStatus{Devices: inv}
+
+		discoveredDDPs := getDDPsFromHost(log)
+
+		nodeStatus := ethernetv1.EthernetNodeConfigStatus{Devices: inv, DiscoveredDDPs: discoveredDDPs}
 
 		for _, condition := range c {
 			meta.SetStatusCondition(&nodeStatus.Conditions, condition)
@@ -281,18 +288,26 @@ func (r *NodeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	updateQueue, err := r.prepareUpdateQueue(nodeConfig)
 	if err != nil {
 		r.updateCondition(nodeConfig, metav1.ConditionFalse, UpdateFailed, err.Error())
-		return requeueLater()
+		return r.retryOnFail(nodeConfig)
 	}
 
 	rebootRequired, err := r.configureNode(updateQueue, nodeConfig)
 	if err != nil {
 		r.updateCondition(nodeConfig, metav1.ConditionFalse, UpdateFailed, err.Error())
-		return requeueLater()
+		return r.retryOnFail(nodeConfig)
 	}
 
 	if !rebootRequired {
 		r.updateCondition(nodeConfig, metav1.ConditionTrue, UpdateSucceeded, "Updated successfully")
 		log.V(2).Info("Reconciled")
+	}
+
+	return doNotRequeue()
+}
+
+func (r *NodeConfigReconciler) retryOnFail(nodeConfig *ethernetv1.EthernetNodeConfig) (ctrl.Result, error) {
+	if nodeConfig.Spec.RetryOnFail {
+		return requeueLater()
 	}
 
 	return doNotRequeue()
@@ -306,6 +321,11 @@ func (r *NodeConfigReconciler) configureNode(updateQueue deviceUpdateQueue, node
 	drainFunc := func(ctx context.Context) bool {
 		fwReboot := false
 		ddpReboot := false
+
+		// Set more strict permissions to 'firmwareFolder'
+		if err := os.Chmod(firmwareFolder, 0700); err != nil {
+			r.log.Info("Error changing directory permissions", "dir", firmwareFolder, "error", err)
+		}
 
 		for pciAddr, artifacts := range updateQueue {
 			fwReboot, nodeActionErr = r.fwUpdater.handleFWUpdate(pciAddr, artifacts.fwPath, artifacts.fwUpdateParam)
@@ -323,9 +343,18 @@ func (r *NodeConfigReconciler) configureNode(updateQueue deviceUpdateQueue, node
 			}
 		}
 
-		err := os.RemoveAll(artifactsFolder)
+		if err := os.RemoveAll(artifactsFolder); err != nil {
+			r.log.Info("Error deleting artifacts folder after update", "error", err)
+		}
+
+		fwFolderContent, err := os.ReadDir(firmwareFolder)
 		if err != nil {
-			r.log.Info("Error deleting artifacts folder", "error", err)
+			r.log.Info("Error reading directory content", "dir", firmwareFolder, "error", err)
+		}
+		for _, fwSubContent := range fwFolderContent {
+			if err := os.RemoveAll(filepath.Join(firmwareFolder, fwSubContent.Name())); err != nil {
+				r.log.Info("Error deleting file after update", "file", filepath.Join(firmwareFolder, fwSubContent.Name()), "error", err)
+			}
 		}
 
 		if rebootRequired {
@@ -365,7 +394,7 @@ func (r *NodeConfigReconciler) prepareUpdateQueue(nodeConfig *ethernetv1.Etherne
 
 	updateQueue := make(deviceUpdateQueue)
 	for _, deviceConfig := range nodeConfig.Spec.Config {
-		artifacts, err := r.prepareArtifacts(deviceConfig, inv)
+		artifacts, err := r.prepareArtifacts(deviceConfig, nodeConfig.Status.DiscoveredDDPs, inv)
 		if err != nil {
 			r.log.Error(err, "Failed to prepare artifacts for", "device", deviceConfig.PCIAddress)
 			return deviceUpdateQueue{}, err
@@ -375,7 +404,7 @@ func (r *NodeConfigReconciler) prepareUpdateQueue(nodeConfig *ethernetv1.Etherne
 	return updateQueue, nil
 }
 
-func (r *NodeConfigReconciler) prepareArtifacts(config ethernetv1.DeviceNodeConfig, inv []ethernetv1.Device) (deviceUpdateArtifacts, error) {
+func (r *NodeConfigReconciler) prepareArtifacts(config ethernetv1.DeviceNodeConfig, discoveredDDPs []string, inv []ethernetv1.Device) (deviceUpdateArtifacts, error) {
 	log := r.log.WithName("prepare")
 
 	fwPath, err := r.fwUpdater.prepareFirmware(config)
@@ -388,7 +417,7 @@ func (r *NodeConfigReconciler) prepareArtifacts(config ethernetv1.DeviceNodeConf
 		log.V(4).Info("Found NVM Update parameter", "parameter", config.DeviceConfig.FWUpdateParam)
 	}
 
-	ddpPath, err := r.ddpUpdater.prepareDDP(config)
+	ddpPath, err := r.ddpUpdater.prepareDDP(config, discoveredDDPs)
 	if err != nil {
 		log.Error(err, "Failed to prepare DDP")
 		return deviceUpdateArtifacts{}, err

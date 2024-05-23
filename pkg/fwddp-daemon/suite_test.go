@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package daemon
 
@@ -26,11 +26,10 @@ import (
 )
 
 var (
-	config        *rest.Config
-	k8sClient     client.Client
-	testEnv       *envtest.Environment
-	testTmpFolder string
-	log           = ctrl.Log.WithName("EthernetDaemon-test")
+	config    *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+	log       = ctrl.Log.WithName("EthernetDaemon-test")
 )
 
 func TestAPIs(t *testing.T) {
@@ -63,6 +62,8 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	k8sClient, err = client.New(config, client.Options{Scheme: scheme.Scheme})
 	Expect(err).ToNot(HaveOccurred())
 	Expect(k8sClient).ToNot(BeNil())
+	err = os.Mkdir(ddpDir, 0777)
+	Expect(err).ToNot(HaveOccurred())
 }, NodeTimeout(60*time.Second))
 
 var _ = AfterSuite(func() {
@@ -70,6 +71,9 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).ToNot(HaveOccurred())
 
-	err = os.RemoveAll(testTmpFolder)
-	Expect(err).ShouldNot(HaveOccurred())
+	By("clearing tmp directories")
+	err = os.RemoveAll("./testdir")
+	Expect(err).ToNot(HaveOccurred())
+	err = os.RemoveAll(ddpDir)
+	Expect(err).ToNot(HaveOccurred())
 })

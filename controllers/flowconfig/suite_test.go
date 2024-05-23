@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package flowconfig
 
@@ -27,6 +27,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	flowconfigv1 "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/apis/flowconfig/v1"
 	"github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/pkg/flowconfig/flowsets"
@@ -208,8 +209,10 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		var metricsAddr = fmt.Sprintf(":%d", (r1.Intn(100) + 38080))
 
 		k8sManager, err = ctrl.NewManager(cfg, ctrl.Options{
-			Scheme:             scheme.Scheme,
-			MetricsBindAddress: metricsAddr,
+			Scheme: scheme.Scheme,
+			Metrics: server.Options{
+				BindAddress: metricsAddr,
+			},
 		})
 		return err
 	}, "15s", "5s").ShouldNot(HaveOccurred())

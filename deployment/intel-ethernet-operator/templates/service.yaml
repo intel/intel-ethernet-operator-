@@ -1,0 +1,19 @@
+{{/*
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+*/}}
+
+{{- if .Values.webhookServerConfiguration.enable -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "intel-ethernet-operator.webhookService" . }}
+  labels:
+    {{- include "intel-ethernet-operator.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: 443
+      targetPort: 9443
+  selector:
+    {{- include "intel-ethernet-operator.selectorLabels" . | nindent 4 }}
+{{- end }}

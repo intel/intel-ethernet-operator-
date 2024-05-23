@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -12,6 +12,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 var nodeflowconfiglog = logf.Log.WithName("nodeflowconfig-resource")
@@ -78,7 +79,7 @@ func (rules *FlowRules) validate() error {
 	return nil
 }
 
-func validatePortId(id uint32) error {
+func validatePortId(_ uint32) error {
 	return nil
 }
 
@@ -146,36 +147,36 @@ func validateRteFlowAction(rteFlowAction *flow.RteFlowAction) error {
 }
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *NodeFlowConfig) ValidateCreate() error {
+func (r *NodeFlowConfig) ValidateCreate() (admission.Warnings, error) {
 	nodeflowconfiglog.Info("validate create", "name", r.Name)
 	spec := r.Spec
 	for _, rule := range spec.Rules {
 		err := rule.validate()
 		if err != nil {
-			return err
+			return admission.Warnings{}, err
 		}
 	}
-	return nil
+	return admission.Warnings{}, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *NodeFlowConfig) ValidateUpdate(old runtime.Object) error {
+func (r *NodeFlowConfig) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	nodeflowconfiglog.Info("validate update", "name", r.Name)
 
 	spec := r.Spec
 	for _, rule := range spec.Rules {
 		err := rule.validate()
 		if err != nil {
-			return err
+			return admission.Warnings{}, err
 		}
 	}
 
-	return nil
+	return admission.Warnings{}, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *NodeFlowConfig) ValidateDelete() error {
+func (r *NodeFlowConfig) ValidateDelete() (admission.Warnings, error) {
 	nodeflowconfiglog.Info("validate delete", "name", r.Name)
 	// nothing to do on deletion
-	return nil
+	return admission.Warnings{}, nil
 }

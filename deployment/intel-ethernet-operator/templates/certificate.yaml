@@ -1,0 +1,27 @@
+{{/*
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+*/}}
+
+{{- if and .Values.webhookServerConfiguration.enable .Values.webhookServerConfiguration.useCertManager -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "intel-ethernet-operator.certificate" . }}
+spec:
+  dnsNames:
+    - {{ printf "%s.%s.svc" (include "intel-ethernet-operator.webhookService" .) .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" .Release.Namespace (include "intel-ethernet-operator.webhookService" .) | quote }}
+  issuerRef:
+    kind: Issuer
+    name: {{ include "intel-ethernet-operator.selfSignedIssuer" . }}
+  secretName: {{ include "intel-ethernet-operator.webhookCertsSecret" . }}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "intel-ethernet-operator.selfSignedIssuer" . }}
+spec:
+  selfSigned: {}
+{{- end }}

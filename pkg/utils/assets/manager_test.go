@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package assets
 
@@ -308,8 +308,8 @@ var _ = Describe("Asset Tests", func() {
 			getConfigMap = func(ctx context.Context, c client.Client, cmName string, ns string) (corev1.ConfigMap, error) {
 				configMap := corev1.ConfigMap{
 					Data: map[string]string{
-						"configMap":         "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: supported-clv-devices\n  namespace: default\nimmutable: false\ndata:\n  fake-key-1: fake-value-1\n  fake-key-2: fake-value-2",
-						"configMap-updated": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: supported-clv-devices\n  namespace: default\nimmutable: false\ndata:\n  fake-key-1: new-fake-value-1\n  fake-key-2: fake-value-2",
+						"configMap":         "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: supported-cvl-devices\n  namespace: default\nimmutable: false\ndata:\n  fake-key-1: fake-value-1\n  fake-key-2: fake-value-2",
+						"configMap-updated": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: supported-cvl-devices\n  namespace: default\nimmutable: false\ndata:\n  fake-key-1: new-fake-value-1\n  fake-key-2: fake-value-2",
 					},
 				}
 				return configMap, nil

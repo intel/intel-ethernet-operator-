@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package flowconfig
 
@@ -22,7 +22,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -475,7 +474,7 @@ func getPodInterfaceNameFromRawExtension(conf *runtime.RawExtension) (string, er
 	return podInterfaceName.NetInterfaceName, nil
 }
 
-func (r *ClusterFlowConfigReconciler) mapPodsToRequests(object client.Object) []reconcile.Request {
+func (r *ClusterFlowConfigReconciler) mapPodsToRequests(ctx context.Context, object client.Object) []reconcile.Request {
 	logger := r.Log.WithName("mapPodsToRequests")
 	reconcileRequests := make([]reconcile.Request, 0)
 
@@ -577,7 +576,7 @@ func (r *ClusterFlowConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&flowconfigv1.ClusterFlowConfig{}).
 		Watches(
-			&source.Kind{Type: &corev1.Pod{}},
+			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.mapPodsToRequests),
 		).
 		WithEventFilter(r.getPodFilterPredicates()).

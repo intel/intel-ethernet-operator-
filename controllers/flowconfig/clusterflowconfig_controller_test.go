@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package flowconfig
 
@@ -31,7 +31,7 @@ const (
 )
 
 func WaitForObjectCreation(core client.Client, objectName, ns string, timeout, interval time.Duration, object client.Object) error {
-	return wait.PollImmediate(interval, timeout, func() (done bool, err error) {
+	return wait.PollUntilContextTimeout(context.Background(), interval, timeout, true, func(ctx context.Context) (done bool, err error) {
 		err = GetObject(core, objectName, ns, timeout, object)
 		if err != nil {
 			if strings.Contains(err.Error(), fmt.Sprintf("\"%s\" not found", objectName)) {

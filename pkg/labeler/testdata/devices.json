@@ -7,5 +7,11 @@
 	},
 	"E811": {
 		"VendorID": "0002", "Class": "00", "SubClass": "00", "DeviceID": "321"
+	},
+	"X710": {
+		"VendorID": "8086", "Class": "02", "SubClass": "00", "DeviceID": "1572"
+	},
+	"X711": {
+		"VendorID": "0003", "Class": "00", "SubClass": "00", "DeviceID": "231"
 	}
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package fwddp_manager
 
@@ -37,15 +37,15 @@ var NAMESPACE = os.Getenv("ETHERNET_NAMESPACE")
 //+kubebuilder:rbac:groups=ethernet.intel.com,resources=ethernetclusterconfigs/finalizers;ethernetnodeconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigs,verbs=create;get
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=list;watch
-//+kubebuilder:rbac:groups=apps,resources=daemonsets;deployments;deployments/finalizers,verbs=*
-//+kubebuilder:rbac:groups="",resources=namespaces;serviceaccounts;configmaps,verbs=*
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=*
+//+kubebuilder:rbac:groups=apps,resources=daemonsets;deployments;deployments/finalizers,verbs=create;delete;deletecollection;get;list;patch;update;watch
+//+kubebuilder:rbac:groups="",resources=namespaces;serviceaccounts;configmaps,verbs=create;delete;deletecollection;get;list;patch;update;watch
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=create;delete;deletecollection;get;list;patch;update;watch;bind;escalate
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=privileged,verbs=use
 //+kubebuilder:rbac:groups=config.openshift.io,resources=infrastructures,verbs=get;list;watch
 
 func (r *EthernetClusterConfigReconciler) Reconcile(_ context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("ethernetclusterconfig", req.NamespacedName)
-	log.V(2).Info("Reconciling EthernetClusterConfig")
+	log.Info("Reconciling EthernetClusterConfig")
 
 	// Get EthernetClusterConfigList
 	clusterConfigs := &ethernetv1.EthernetClusterConfigList{}
@@ -55,10 +55,7 @@ func (r *EthernetClusterConfigReconciler) Reconcile(_ context.Context, req ctrl.
 		return ctrl.Result{}, err
 	}
 
-	// Get nodes where intel etherenet devices were discovered
-	nodes := &corev1.NodeList{}
-	clvLabel := &client.MatchingLabels{"ethernet.intel.com/intel-ethernet-present": ""}
-	err = r.List(context.TODO(), nodes, clvLabel)
+	nodes, err := r.getNodesWithEthernetDevices()
 	if err != nil {
 		log.Error(err, "Failed to list Nodes")
 		return ctrl.Result{}, err
@@ -135,7 +132,7 @@ func (pm *clusterConfigMatcher) prepareDeviceConfigContext(nodeConfig *ethernetv
 					deviceConfigContext[device.PCIAddress] = current
 				case current.Spec.Priority == previous.Spec.Priority: //multiple configs with same priority; drop older one
 					if current.CreationTimestamp.After(previous.CreationTimestamp.Time) {
-						pm.log.V(2).
+						pm.log.
 							Info("Dropping older ClusterConfig",
 								"Node", nodeConfig.Name,
 								"SriovFecClusterConfig", previous.Name,
@@ -146,7 +143,7 @@ func (pm *clusterConfigMatcher) prepareDeviceConfigContext(nodeConfig *ethernetv
 					}
 
 				case current.Spec.Priority < previous.Spec.Priority: //drop current with lower priority
-					pm.log.V(2).
+					pm.log.
 						Info("Dropping low prioritized ClusterConfig",
 							"node", nodeConfig.Name,
 							"SriovFecClusterConfig", current.Name,
@@ -155,7 +152,40 @@ func (pm *clusterConfigMatcher) prepareDeviceConfigContext(nodeConfig *ethernetv
 			}
 		}
 	}
+
 	return deviceConfigContext
+}
+
+// Get nodes where CVL or FVL NICs were discovered
+func (r *EthernetClusterConfigReconciler) getNodesWithEthernetDevices() (*corev1.NodeList, error) {
+	cvlNodes := &corev1.NodeList{}
+	cvlLabel := &client.MatchingLabels{os.Getenv("ETHERNET_CVL_NODE_LABEL"): ""}
+	if err := r.List(context.TODO(), cvlNodes, cvlLabel); err != nil {
+		return nil, err
+	}
+
+	fvlNodes := &corev1.NodeList{}
+	fvlLabel := &client.MatchingLabels{os.Getenv("ETHERNET_FVL_NODE_LABEL"): ""}
+	if err := r.List(context.TODO(), fvlNodes, fvlLabel); err != nil {
+		return nil, err
+	}
+
+	// Create one NodeList by appending FVL nodes to CVL nodes
+	for _, fvlNode := range fvlNodes.Items {
+		exists := false
+		for _, cvlNode := range cvlNodes.Items {
+			if fvlNode.Name == cvlNode.Name {
+				exists = true
+				break
+			}
+		}
+
+		if !exists {
+			cvlNodes.Items = append(cvlNodes.Items, fvlNode)
+		}
+	}
+
+	return cvlNodes, nil
 }
 
 func matchConfigsForNode(node *corev1.Node, allConfigs []ethernetv1.EthernetClusterConfig) (nodeConfigs []ethernetv1.EthernetClusterConfig) {
@@ -166,6 +196,7 @@ func matchConfigsForNode(node *corev1.Node, allConfigs []ethernetv1.EthernetClus
 			nodeConfigs = append(nodeConfigs, config)
 		}
 	}
+
 	return
 }
 
@@ -179,6 +210,7 @@ func (r *EthernetClusterConfigReconciler) getOrInitializeEthernetNodeConfig(name
 		nc.Namespace = NAMESPACE
 		nc.Spec.Config = []ethernetv1.DeviceNodeConfig{}
 	}
+
 	return nc, nil
 }
 
@@ -194,13 +226,16 @@ func (r *EthernetClusterConfigReconciler) synchronizeNodeConfigSpec(ncc NodeConf
 	for pciAddress, cc := range deviceConfigContext {
 		dnc := ethernetv1.DeviceNodeConfig{PCIAddress: pciAddress}
 		dnc.DeviceConfig = cc.Spec.DeviceConfig
+
+		newNodeConfig.Spec.RetryOnFail = cc.Spec.RetryOnFail
 		newNodeConfig.Spec.Config = append(newNodeConfig.Spec.Config, dnc)
 		newNodeConfig.Spec.DrainSkip = newNodeConfig.Spec.DrainSkip || drainSkip
 	}
 
-	if !equality.Semantic.DeepDerivative(newNodeConfig.Spec, currentNodeConfig.Spec) {
+	if !equality.Semantic.DeepEqual(newNodeConfig.Spec, currentNodeConfig.Spec) {
 		return r.Update(context.TODO(), newNodeConfig)
 	}
+
 	return nil
 }
 

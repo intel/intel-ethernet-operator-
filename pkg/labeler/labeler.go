@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package labeler
 
@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 
+	daemon "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/pkg/fwddp-daemon"
 	"github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/pkg/utils"
 	"github.com/jaypipes/ghw"
+	"golang.org/x/exp/maps"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -35,49 +37,62 @@ var getPCIDevices = func() ([]*ghw.PCIDevice, error) {
 	return devices, nil
 }
 
-func isDeviceSupported(dev *ghw.PCIDevice, supportedList *utils.SupportedDevices) bool {
-	for name, supported := range *supportedList {
-		if dev.Vendor.ID != supported.VendorID {
-			continue
-		} else if dev.Class.ID != supported.Class {
-			continue
-		} else if dev.Subclass.ID != supported.SubClass {
-			continue
-		} else if dev.Product.ID != supported.DeviceID {
-			continue
-		}
-
-		fmt.Printf("FOUND %v at %v: Vendor=%v Class=%v:%v Device=%v\n", name,
-			dev.Address, dev.Vendor.ID, dev.Class.ID,
-			dev.Subclass.ID, dev.Product.ID)
-		return true
-	}
-
-	return false
-}
-
-func findSupportedDevice(supportedList *utils.SupportedDevices) (bool, error) {
+var findAllSupportedDevices = func(supportedList *utils.SupportedDevices) (map[string]*ghw.PCIDevice, error) {
 	if supportedList == nil {
-		return false, fmt.Errorf("config not provided")
+		return nil, fmt.Errorf("config not provided")
 	}
 
 	present, err := getPCIDevices()
 	if err != nil {
-		return false, fmt.Errorf("failed to get PCI devices: %v", err)
+		return nil, fmt.Errorf("failed to get PCI devices: %v", err)
 	}
 
+	supportedDevices := make(map[string]*ghw.PCIDevice)
+
 	for _, dev := range present {
-		if isDeviceSupported(dev, supportedList) {
-			return true, nil
+		supported, key := isDeviceSupported(dev, supportedList)
+		if supported {
+			supportedDevices[key] = dev
+		}
+	}
+	return supportedDevices, nil
+}
+
+func isDeviceSupported(dev *ghw.PCIDevice, supportedList *utils.SupportedDevices) (bool, string) {
+	for key, supported := range *supportedList {
+		if dev.Vendor.ID == supported.VendorID &&
+			dev.Class.ID == supported.Class &&
+			dev.Subclass.ID == supported.SubClass &&
+			dev.Product.ID == supported.DeviceID {
+
+			fmt.Printf("FOUND %v at %v: Vendor=%v Class=%v:%v Device=%v\n", key,
+				dev.Address, dev.Vendor.ID, dev.Class.ID,
+				dev.Subclass.ID, dev.Product.ID)
+			return true, key
 		}
 	}
 
-	return false, nil
+	return false, ""
+}
+
+func findSupportedDevice(supportedList *utils.SupportedDevices) (bool, error) {
+	supportedDevices, err := findAllSupportedDevices(supportedList)
+	fmt.Println("Supported devices: ", supportedDevices)
+
+	if err != nil {
+		return false, err
+	}
+
+	if len(supportedDevices) == 0 {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func setNodeLabel(nodeName, label string, isDevicePresent bool) error {
 	if label == "" {
-		return fmt.Errorf("label is empty (check the NODELABEL env var)")
+		return fmt.Errorf("label is empty (check CVLLABEL or FVLLABEL env vars)")
 	}
 	if nodeName == "" {
 		return fmt.Errorf("nodeName is empty (check the NODENAME env var)")
@@ -120,10 +135,28 @@ func DeviceDiscovery() error {
 		return fmt.Errorf("no devices configured")
 	}
 
-	devFound, err := findSupportedDevice(supportedDevices)
+	foundSupportedDevices, err := findAllSupportedDevices(supportedDevices)
 	if err != nil {
-		return fmt.Errorf("failed to find device: %v", err)
+		return fmt.Errorf("failed to find any supported device: %v", err)
+	}
+	cvlSupported := false
+	fvlSupported := false
+
+	for _, key := range maps.Keys(foundSupportedDevices) {
+		if daemon.IsCvlKey(key) && !cvlSupported {
+			cvlSupported = true
+		} else if daemon.IsFvlKey(key) && !fvlSupported {
+			fvlSupported = true
+		}
 	}
 
-	return setNodeLabel(os.Getenv("NODENAME"), os.Getenv("NODELABEL"), devFound)
+	err = setNodeLabel(os.Getenv("NODENAME"), os.Getenv("CVLLABEL"), cvlSupported)
+
+	if err != nil {
+		return err
+	}
+
+	err = setNodeLabel(os.Getenv("NODENAME"), os.Getenv("FVLLABEL"), fvlSupported)
+
+	return err
 }

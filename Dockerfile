@@ -1,15 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 # Build the manager binary
-FROM golang:alpine3.18 as builder
+FROM docker.io/golang:alpine3.19 as builder
 
 WORKDIR /workspace
-
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY main.go main.go
@@ -19,17 +15,12 @@ COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o manager main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on \
+    go build -trimpath -mod=readonly -gcflags="all=-spectre=all -N -l" \
+    -asmflags="all=-spectre=all" -ldflags="all=-s -w" -a -o \
+    manager main.go
 
-# Install packages in clean filesystem
-FROM registry.access.redhat.com/ubi9/ubi:9.2-489 AS package_installer
-RUN mkdir -p /mnt/rootfs && \
-    yum install --installroot /mnt/rootfs coreutils-single glibc-minimal-langpack kmod \
-        --releasever 9 --setopt install_weak_deps=false --nodocs -y && \
-    yum --installroot /mnt/rootfs clean all && \
-    rm -rf /mnt/rootfs/var/cache/* /mnt/rootfs/var/log/dnf* /mnt/rootfs/var/log/yum.*
-
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.2-5
+FROM docker.io/redhat/ubi9-micro:9.3-15
 
 ARG VERSION
 ### Required OpenShift Labels
@@ -42,8 +33,13 @@ LABEL name="Intel Ethernet Operator" \
 
 USER 1001
 WORKDIR /
-COPY --from=package_installer /mnt/rootfs/ /
 COPY --from=builder /workspace/manager .
 COPY assets/ assets/
+
+USER root
+RUN mkdir /licenses
+COPY LICENSE /licenses/LICENSE.txt
+RUN chown 1001 /licenses
+USER 1001
 
 ENTRYPOINT ["/manager"]

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package utils
 
@@ -29,6 +29,8 @@ import (
 
 	"github.com/go-logr/logr"
 	configv1 "github.com/openshift/api/config/v1"
+
+	"github.com/ulikunitz/xz"
 )
 
 type SupportedDevices map[string]SupportedDevice
@@ -47,10 +49,10 @@ const IeoPrefix = "ETHERNET_"
 func GetDrainSkip(nodes *corev1.NodeList, client client.Client, log logr.Logger) (bool, error) {
 	if IsK8sDeployment() {
 		if len(nodes.Items) <= 1 {
-			log.Info("found only 0 or 1 node(s) with CLV label in cluster - operator is running on SNO")
+			log.Info("found only 0 or 1 node(s) with CVL label in cluster - operator is running on SNO")
 			return true, nil
 		}
-		log.Info("found several nodes with CLV label in cluster - operator is running on Cluster deployment", "nodes", len(nodes.Items))
+		log.Info("found several nodes with CVL label in cluster - operator is running on Cluster deployment", "nodes", len(nodes.Items))
 		return false, nil
 	}
 	return IsOpenshiftSno(client, log)
@@ -73,6 +75,7 @@ func GetFwSearchPath() (string, error) {
 
 	fwPath := string(fwPathBytes)
 	fwPath = strings.ReplaceAll(fwPath, "\n", "")
+	fwPath = strings.ReplaceAll(fwPath, " ", "")
 	if fwPath == "" {
 		fwPath = defaultFwPath
 	}
@@ -173,6 +176,7 @@ func NewSecureHttpsClient(cert *x509.Certificate) (*http.Client, error) {
 		TLSClientConfig: &tls.Config{
 			RootCAs:    certPool,
 			ClientAuth: tls.RequireAndVerifyClientCert,
+			MinVersion: tls.VersionTLS13,
 		},
 	}
 	httpsClient := http.Client{
@@ -388,7 +392,7 @@ func Unzip(srcPath, dstPath string, log logr.Logger) error {
 	return nil
 }
 
-func UnpackDDPArchive(srcPath, dstPath string, log logr.Logger) error {
+func UnpackDDPZipArchive(srcPath, dstPath string, log logr.Logger) error {
 	log.V(4).Info("Unpack DDP archive", "srcPath", srcPath, "dstPath", dstPath)
 	err := Unzip(srcPath, dstPath, log)
 
@@ -420,6 +424,41 @@ func UnpackDDPArchive(srcPath, dstPath string, log logr.Logger) error {
 		}
 
 	default:
+		return err
+	}
+
+	return nil
+}
+
+func ExtractXZArchive(srcPath, dstPath string) error {
+	xzFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer xzFile.Close()
+
+	xzReader, err := xz.NewReader(xzFile)
+	if err != nil {
+		return err
+	}
+
+	file, err := OpenFileNoLinks(dstPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, xzReader)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func UnpackDDPXZArchive(srcPath, dstPath string, log logr.Logger) error {
+	log.V(4).Info("Unpack XZ archive", "srcPath", srcPath, "dstPath", dstPath)
+	if err := ExtractXZArchive(srcPath, dstPath); err != nil {
 		return err
 	}
 

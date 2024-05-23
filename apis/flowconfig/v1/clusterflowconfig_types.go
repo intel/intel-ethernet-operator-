@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -34,7 +34,7 @@ type ClusterFlowConfigStatus struct {
 //+kubebuilder:subresource:status
 
 // ClusterFlowConfig is the Schema for the clusterflowconfigs API
-//+operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,flowconfig-daemon}}
+// +operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,flowconfig-daemon}}
 type ClusterFlowConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

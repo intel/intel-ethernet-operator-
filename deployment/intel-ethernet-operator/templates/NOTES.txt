@@ -1,0 +1,6 @@
+Get all resources deployed by Intel Ethernet Operator using the following command:
+
+$ kubectl -n {{ .Release.Namespace }} get all
+
+For additional instructions and product documentation refer to:
+https://github.com/intel/intel-ethernet-operator

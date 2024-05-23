@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package fwddp_manager
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -47,6 +48,9 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		ErrorIfCRDPathMissing: true,
 	}
 
+	Expect(os.Setenv("ETHERNET_CVL_NODE_LABEL", "ethernet.intel.com/intel-ethernet-cvl-present")).To(Succeed())
+	Expect(os.Setenv("ETHERNET_FVL_NODE_LABEL", "ethernet.intel.com/intel-ethernet-fvl-present")).To(Succeed())
+
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
@@ -71,4 +75,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	_ = testEnv.Stop()
+
+	Expect(os.Unsetenv("ETHERNET_CVL_NODE_LABEL")).To(Succeed())
+	Expect(os.Unsetenv("ETHERNET_FVL_NODE_LABEL")).To(Succeed())
 })
