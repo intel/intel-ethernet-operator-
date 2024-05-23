@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 export APP_NAME=intel-ethernet-operator
 
@@ -15,9 +15,17 @@ VERSION ?= 0.0.1
 # Set default K8CLI tool to 'oc' if it's not defined. To change this you can export this in env. e.g., export K8CLI=kubectl
 K8CLI ?= oc
 
-TARGET_PLATFORM ?= OCP
 # Set default IMGTOOL tool to 'podman' if it's not defined. To change this you can export this in env. e.g., export IMGTOOL=docker
-IMGTOOL ?= podman
+IMGTOOL ?= docker
+
+# NOCACHE prevents docker to use cache during an image building
+# Valid values are 1 or true
+NOCACHE ?= false
+VALID_NOCACHE_VALUES = 1 true
+NOCACHE_ARG=
+ifneq ($(filter $(shell echo $(NOCACHE) | tr A-Z a-z), $(VALID_NOCACHE_VALUES)),)
+NOCACHE_ARG=--no-cache
+endif
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "preview,fast,stable")
@@ -149,6 +157,12 @@ flowconfig-manifests: kustomize
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
+.PHONY: helm-configure
+helm-configure:
+	sed -i 's|repository:.*|repository: "${IMAGE_REGISTRY}"|' deployment/intel-ethernet-operator/values.yaml
+	sed -i 's|tag:.*|tag: "${VERSION}"|' deployment/intel-ethernet-operator/values.yaml
+	sed -i 's|appVersion:.*|appVersion: "${VERSION}"|' deployment/intel-ethernet-operator/Chart.yaml
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -158,7 +172,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.24
+ENVTEST_K8S_VERSION = 1.28
 
 ##@ Build Dependencies
 
@@ -173,8 +187,8 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 ## Tool Versions
-KUSTOMIZE_VERSION ?= v3.8.7
-CONTROLLER_TOOLS_VERSION ?= v0.9.2
+KUSTOMIZE_VERSION ?= v5.2.1
+CONTROLLER_TOOLS_VERSION ?= v0.13.0
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
@@ -207,10 +221,21 @@ test_daemon: manifests generate fmt vet envtest ## Run tests only for the fwddp_
 
 .PHONY: test_fuzz
 test_fuzz: manifests generate fmt vet envtest ## Run fuzz tests only. Set FUZZITER= variable to set number of fuzz iteration.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" FUZZITER=100 ETHERNET_NAMESPACE=default go test -v ./apis/flowconfig/v1 -run "ValidateCreateFuzz" -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" FUZZITER=1000 ETHERNET_NAMESPACE=default go test -v ./apis/flowconfig/v1 -run "ValidateCreateFuzz" -coverprofile cover.out
+
+TEST_PACKAGES := $(shell find . -name "ddpupdater_fuzz_test.go")
+
+.PHONY: fuzz
+fuzz:
+	@for pkg in ${TEST_PACKAGES} ; do            \
+		for target in `grep -oh -EI 'Fuzz([A-Z][a-z]*)+' $$pkg` ; do     \
+			echo "Executing $$pkg#$$target";     \
+			KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" ETHERNET_NAMESPACE=default  go test -v -fuzz=$$target $$pkg/.. --fuzztime=500m || true; \
+		done                              \
+	done
 
 .PHONY: build
-build: generate fmt vet ## Build manager binary.
+build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager main.go
 
 # Build flowconfig-daemon binary
@@ -228,21 +253,21 @@ run: manifests flowconfig-manifests generate fmt vet ## Run a controller from yo
 
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	$(IMGTOOL) build -t ${IMAGE_TAG_VERSION} ${DOCKERARGS} .
+	$(IMGTOOL) build ${NOCACHE_ARG} -t ${IMAGE_TAG_VERSION} ${DOCKERARGS} .
 	$(IMGTOOL) image tag ${IMAGE_TAG_VERSION} ${IMAGE_TAG_LATEST}
 
 .PHONY: docker-build-manager
 docker-build-manager: flowconfig-manifests
-	$(IMGTOOL) build --file Dockerfile --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_MANAGER_IMAGE} ${DOCKERARGS} .
+	$(IMGTOOL) build ${NOCACHE_ARG} --file Dockerfile --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_MANAGER_IMAGE} ${DOCKERARGS} .
 	$(IMGTOOL) image tag ${ETHERNET_MANAGER_IMAGE} ${IMAGE_TAG_LATEST}
 
 .PHONY: docker-build-daemon
 docker-build-daemon:
-	$(IMGTOOL) build --file Dockerfile.daemon --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_DAEMON_IMAGE} ${DOCKERARGS} .
+	$(IMGTOOL) build ${NOCACHE_ARG} --file Dockerfile.daemon --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_DAEMON_IMAGE} ${DOCKERARGS} .
 
 .PHONY: docker-build-labeler
 docker-build-labeler:
-	$(IMGTOOL) build --file Dockerfile.labeler --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_NODE_LABELER_IMAGE} ${DOCKERARGS} .
+	$(IMGTOOL) build ${NOCACHE_ARG} --file Dockerfile.labeler --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_NODE_LABELER_IMAGE} ${DOCKERARGS} .
 
 .PHONY: docker-push-manager
 docker-push-manager:
@@ -259,7 +284,7 @@ docker-push-labeler:
 # Build FlowConfigDaemon docker image
 .PHONY: docker-build-flowconfig
 docker-build-flowconfig:
-	$(IMGTOOL) build . -f ${FCDAEMON_DOCKERFILE} -t ${FCDAEMON_IMG} $(DOCKERARGS)
+	$(IMGTOOL) build ${NOCACHE_ARG} . -f ${FCDAEMON_DOCKERFILE} -t ${FCDAEMON_IMG} $(DOCKERARGS)
 	$(IMGTOOL) image tag ${FCDAEMON_IMG} ${FCDAEMON_IMAGE_TAG_LATEST}
 
 .PHONY: docker-push-flowconfig
@@ -288,16 +313,19 @@ deploy: manifests flowconfig-manifests kustomize ## Deploy controller to the K8s
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/default | $(K8CLI) delete --ignore-not-found=$(ignore-not-found) -f -
 
+.PHONY: helm-deploy
+helm-deploy: ## Use helm to deploy operator to the K8s cluster specified in ~/.kube/config.
+	helm install intel-ethernet-operator deployment/intel-ethernet-operator --namespace=intel-ethernet-operator
+
+.PHONY: helm-undeploy
+helm-undeploy: ## Use helm to deploy operator to the K8s cluster specified in ~/.kube/config.
+	helm uninstall intel-ethernet-operator --namespace=intel-ethernet-operator
+
 .PHONY: bundle
 bundle: manifests kustomize flowconfig-manifests ## Generate bundle manifests and metadata, then validate generated files.
 	operator-sdk generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(ETHERNET_MANAGER_IMAGE)
 	$(KUSTOMIZE) build config/manifests | envsubst | operator-sdk generate bundle $(BUNDLE_GEN_FLAGS)
-ifeq ("$(TARGET_PLATFORM)", "OCP")
-	cp config/metadata/bases/dependencies.yaml bundle/metadata/dependencies.yaml
-else
-	rm -f bundle/metadata/dependencies.yaml
-endif
 	operator-sdk bundle validate ./bundle
 	FOLDER=. COPYRIGHT_FILE=COPYRIGHT ./copyright.sh
 	cat COPYRIGHT bundle.Dockerfile >bundle.tmp
@@ -306,14 +334,14 @@ endif
 
 .PHONY: bundle-build
 bundle-build: bundle ## Build the bundle image.
-	$(IMGTOOL) build -f bundle.Dockerfile -t $(BUNDLE_IMG) ${DOCKERARGS} .
+	$(IMGTOOL) build ${NOCACHE_ARG} -f bundle.Dockerfile -t $(BUNDLE_IMG) ${DOCKERARGS} .
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.
 	$(call push_image,${BUNDLE_IMG})
 
 .PHONY: opm
-OPM_VERSION = v1.26.2
+OPM_VERSION = v1.29.0
 OPM = ./bin/opm
 opm: ## Download opm locally if necessary.
 ifeq (,$(wildcard $(OPM)))
@@ -348,17 +376,26 @@ endif
 # The image tag given to the resulting catalog image (e.g. make catalog-build CATALOG_IMG=example.com/operator-catalog:v0.2.0).
 CATALOG_IMG ?= $(IMAGE_TAG_BASE)-catalog:v$(VERSION)
 
-# Set CATALOG_BASE_IMG to an existing catalog image tag to add $BUNDLE_IMGS to that image.
-ifneq ($(origin CATALOG_BASE_IMG), undefined)
-FROM_INDEX_OPT := --from-index $(CATALOG_BASE_IMG)
-endif
+# You can set this value to true if your registry uses HTTP instead of HTTPS
+USE_HTTP ?= false
 
-# Build a catalog image by adding bundle images to an empty catalog using the operator package manager tool, 'opm'.
-# This recipe invokes 'opm' in 'semver' bundle add mode. For more information on add modes, see:
-# https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
+# Build a file based catalog image, see: https://olm.operatorframework.io/docs/tasks/creating-a-catalog/
 .PHONY: catalog-build
 catalog-build: opm ## Build a catalog image.
-	$(OPM) index add --container-tool $(IMGTOOL) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(if ifeq $(TLS_VERIFY) false, --skip-tls) $(FROM_INDEX_OPT)
+	rm -fr catalog catalog.Dockerfile && mkdir catalog
+	$(OPM) generate dockerfile catalog
+	$(OPM) init $(APP_NAME) --default-channel=alpha --description=./docs/intel-ethernet-operator-catalog.md --output yaml > catalog/$(APP_NAME).yaml
+	$(OPM) render $(BUNDLE_IMG) --skip-tls-verify=$(TLS_VERIFY) --use-http=$(USE_HTTP) --output=yaml >> catalog/$(APP_NAME).yaml
+	
+	echo "---" >> catalog/$(APP_NAME).yaml
+	echo "schema: olm.channel" >> catalog/$(APP_NAME).yaml
+	echo "package: $(APP_NAME)" >> catalog/$(APP_NAME).yaml
+	echo "name: alpha" >> catalog/$(APP_NAME).yaml
+	echo "entries:" >> catalog/$(APP_NAME).yaml
+	echo "- name: $(APP_NAME).v$(VERSION)" >> catalog/$(APP_NAME).yaml
+
+	$(OPM) validate catalog
+	$(IMGTOOL) build ${NOCACHE_ARG} . -f catalog.Dockerfile -t $(CATALOG_IMG)
 
 # Push the catalog image.
 .PHONY: catalog-push

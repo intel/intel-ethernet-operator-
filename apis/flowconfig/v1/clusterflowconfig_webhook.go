@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -12,6 +12,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // log is for logging in this package.
@@ -80,45 +81,45 @@ func validatePodSelector(podSelector *metav1.LabelSelector) error {
 }
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *ClusterFlowConfig) ValidateCreate() error {
+func (r *ClusterFlowConfig) ValidateCreate() (admission.Warnings, error) {
 	clusterflowconfiglog.Info("validate create", "name", r.Name)
 
 	spec := r.Spec
 	for _, rule := range spec.Rules {
 		if err := rule.validate(); err != nil {
-			return err
+			return admission.Warnings{}, err
 		}
 	}
 
 	if err := validatePodSelector(spec.PodSelector); err != nil {
-		return err
+		return admission.Warnings{}, err
 	}
 
-	return nil
+	return admission.Warnings{}, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *ClusterFlowConfig) ValidateUpdate(old runtime.Object) error {
+func (r *ClusterFlowConfig) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	clusterflowconfiglog.Info("validate update", "name", r.Name)
 
 	spec := r.Spec
 	for _, rule := range spec.Rules {
 		if err := rule.validate(); err != nil {
-			return err
+			return admission.Warnings{}, err
 		}
 	}
 
 	if err := validatePodSelector(spec.PodSelector); err != nil {
-		return err
+		return admission.Warnings{}, err
 	}
 
-	return nil
+	return admission.Warnings{}, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *ClusterFlowConfig) ValidateDelete() error {
+func (r *ClusterFlowConfig) ValidateDelete() (admission.Warnings, error) {
 	clusterflowconfiglog.Info("validate delete", "name", r.Name)
 
 	// nothing to do on deletion
-	return nil
+	return admission.Warnings{}, nil
 }

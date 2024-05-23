@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package fwddp_manager
 
@@ -54,7 +54,7 @@ var (
 		ObjectMeta: v1.ObjectMeta{
 			Name: "node-dummy",
 			Labels: map[string]string{
-				"ethernet.intel.com/intel-ethernet-present": "",
+				"ethernet.intel.com/intel-ethernet-cvl-present": "",
 			},
 		},
 	}
@@ -142,7 +142,7 @@ var _ = Describe("EthernetControllerTest", func() {
 
 				createDeviceConfig("cc", func(cc *ethernetv1.EthernetClusterConfig) {
 					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-						VendorID: "notExistingVendor",
+						VendorIDs: []string{"notExistingVendor"},
 					}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						FWURL: "testurl",
@@ -182,7 +182,7 @@ var _ = Describe("EthernetControllerTest", func() {
 
 				hpcc := createDeviceConfig("high-priority-cluster-config", func(cc *ethernetv1.EthernetClusterConfig) {
 					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-						VendorID: "testvendor",
+						VendorIDs: []string{"testvendor"},
 					}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						DDPURL: "testdpdurl",
@@ -193,7 +193,7 @@ var _ = Describe("EthernetControllerTest", func() {
 
 				_ = createDeviceConfig("low-priority-cluster-config", func(cc *ethernetv1.EthernetClusterConfig) {
 					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-						VendorID: "testvendor",
+						VendorIDs: []string{"testvendor"},
 					}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						DDPURL: "testdpdurl_low",
@@ -228,7 +228,7 @@ var _ = Describe("EthernetControllerTest", func() {
 
 					createDeviceConfig("older-cluster-config", func(cc *ethernetv1.EthernetClusterConfig) {
 						cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-							VendorID: "testvendor",
+							VendorIDs: []string{"testvendor"},
 						}
 						cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 							DDPURL: "testddpurl_old",
@@ -241,7 +241,7 @@ var _ = Describe("EthernetControllerTest", func() {
 					time.Sleep(time.Nanosecond)
 					newerCC := createDeviceConfig("newer-cluster-config", func(cc *ethernetv1.EthernetClusterConfig) {
 						cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-							PCIAddress: "0000:15:00.1",
+							PCIAddresses: []ethernetv1.PciAddress{"0000:15:00.1"},
 						}
 						cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 							DDPURL: "testddpurl_new",
@@ -286,7 +286,7 @@ var _ = Describe("EthernetControllerTest", func() {
 
 				cc := createDeviceConfig("older-cluster-config", func(cc *ethernetv1.EthernetClusterConfig) {
 					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-						VendorID: "testvendor",
+						VendorIDs: []string{"testvendor"},
 					}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						DDPURL: "testddpurl",
@@ -323,7 +323,7 @@ var _ = Describe("EthernetControllerTest", func() {
 
 				createDeviceConfig("testconfig", func(cc *ethernetv1.EthernetClusterConfig) {
 					cc.Spec.NodeSelector["foo"] = "bar"
-					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{PCIAddress: "0000:15:00.1"}
+					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{PCIAddresses: []ethernetv1.PciAddress{"0000:15:00.1"}}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						DDPURL: "testddpurl",
 						FWURL:  "testfwurl",
@@ -355,7 +355,7 @@ var _ = Describe("EthernetControllerTest", func() {
 				})
 
 				cc1 := createDeviceConfig("cc1", func(cc *ethernetv1.EthernetClusterConfig) {
-					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{DeviceID: "id1"}
+					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{DeviceIDs: []string{"id1"}}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						DDPURL: "testddpurl_foo",
 						FWURL:  "testfwurl_foo",
@@ -363,7 +363,7 @@ var _ = Describe("EthernetControllerTest", func() {
 				})
 
 				cc2 := createDeviceConfig("cc2", func(cc *ethernetv1.EthernetClusterConfig) {
-					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{DeviceID: "id2"}
+					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{DeviceIDs: []string{"id2"}}
 					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
 						DDPURL: "testddpurl_bar",
 						FWURL:  "testfwurl_bar",
@@ -402,171 +402,158 @@ var _ = Describe("EthernetControllerTest", func() {
 			})
 		})
 
-		When("PCIAddress structure is invalid ", func() {
-			It("will fail to create an instance of NodeConfig", func() {
+		When("single cc referring to multiple accelerators existing on one node ", func() {
+			It("will create one instance of NodeConfig", func() {
+				node := createNode("foobar")
+				createNodeInventory(node.Name, []ethernetv1.Device{
+					{
+						PCIAddress: "0000:15:00.1",
+						DeviceID:   "id1",
+						VendorID:   "testvendor",
+					},
+					{
+						PCIAddress: "0000:15:00.2",
+						DeviceID:   "id2",
+						VendorID:   "testvendor",
+					},
+					{
+						PCIAddress: "0000:15:00.3",
+						DeviceID:   "id3",
+						VendorID:   "testvendor",
+					},
+				})
 
+				cc1 := createDeviceConfig("cc1", func(cc *ethernetv1.EthernetClusterConfig) {
+					cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{DeviceIDs: []string{"id1", "id2"}}
+					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
+						DDPURL: "testddpurl_foo",
+						FWURL:  "testfwurl_foo",
+					}
+				})
+
+				_ = reconcile()
+
+				//Check if node config was created out of cluster config
+				nodeConfigs := new(ethernetv1.EthernetNodeConfigList)
+				Expect(k8sClient.List(context.TODO(), nodeConfigs)).ToNot(HaveOccurred())
+				Expect(len(nodeConfigs.Items)).To(Equal(1))
+				Expect(nodeConfigs.Items[0].Name).To(Equal(node.Name))
+				Expect(nodeConfigs.Items[0].Spec.Config).To(HaveLen(2))
+
+				Expect(nodeConfigs.Items[0].Spec.Config).Should(ContainElement(
+					ethernetv1.DeviceNodeConfig{
+						PCIAddress: "0000:15:00.1",
+						DeviceConfig: ethernetv1.DeviceConfig{
+							FWURL:  cc1.Spec.DeviceConfig.FWURL,
+							DDPURL: cc1.Spec.DeviceConfig.DDPURL,
+						},
+					},
+				))
+
+				Expect(nodeConfigs.Items[0].Spec.Config).Should(ContainElement(
+					ethernetv1.DeviceNodeConfig{
+						PCIAddress: "0000:15:00.2",
+						DeviceConfig: ethernetv1.DeviceConfig{
+							FWURL:  cc1.Spec.DeviceConfig.FWURL,
+							DDPURL: cc1.Spec.DeviceConfig.DDPURL,
+						},
+					},
+				))
+
+				Expect(nodeConfigs.Items[0].Spec.Config).ShouldNot(ContainElement(
+					ethernetv1.DeviceNodeConfig{
+						PCIAddress: "0000:15:00.3",
+						DeviceConfig: ethernetv1.DeviceConfig{
+							FWURL:  cc1.Spec.DeviceConfig.FWURL,
+							DDPURL: cc1.Spec.DeviceConfig.DDPURL,
+						},
+					},
+				))
+			})
+		})
+
+		When("fields that are being validated are not correct", func() {
+			It("PCIAddresses structure is invalid ", func() {
 				cc := clusterConfigPrototype.DeepCopy()
 				cc.Name = "foobar"
 
 				// Valid pattern: ^[a-fA-F0-9]{2,4}:[a-fA-F0-9]{2}:[01][a-fA-F0-9]\.[0-7]$
-
 				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "000:15:00.1",
+					PCIAddresses: []ethernetv1.PciAddress{"000:15:00.1", "0000:1:00.1", "0000:15:20.1", "0000:15:0.1",
+						"0000:15:00", "0000:15:00.10", "0000:1*:00.0", "0000:00.0", "00:10:00.0", "address"},
 				}
-				err := k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
 
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:1:00.1",
-				}
 				err = k8sClient.Create(context.TODO(), cc)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:15:20.1",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:15:0.1",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:15:00",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:15:00.10",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:1*:00.0",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "0000:00.0",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "00:10:00.0",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
-
-				cc.Spec.DeviceSelector = ethernetv1.DeviceSelector{
-					PCIAddress: "address",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceSelector.pciAddress: Invalid value:"))
+				Expect(err.Error()).To(MatchRegexp(`spec\.deviceSelector\.pciAddresses\[\d+\]: Invalid value:`))
 			})
-		})
 
-		When("FWChecksum structure is invalid ", func() {
-			It("will fail to create an instance of NodeConfig", func() {
-
+			It("FWChecksum structure is invalid", func() {
 				cc := clusterConfigPrototype.DeepCopy()
 				cc.Name = "foobar"
 
 				// Valid Pattern=`^[a-fA-F0-9]{40}$`
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					FWChecksum: "1234567890123456789012345678901",
+				invalidFwChecksums := []string{
+					"1234567890123456789012345678901",
+					"1234567890123456789012345678901g",
+					"1234567890123456789012345678901*",
+					"12345678901234567890-12345678901",
+					"1234567890123456789.012345678901",
 				}
-				err := k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.fwChecksum: Invalid value:"))
 
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					FWChecksum: "1234567890123456789012345678901g",
+				for _, invalidFwChecksum := range invalidFwChecksums {
+					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
+						FWChecksum: invalidFwChecksum,
+					}
+					err = k8sClient.Create(context.TODO(), cc)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.fwChecksum: Invalid value:"))
 				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.fwChecksum: Invalid value:"))
-
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					FWChecksum: "1234567890123456789012345678901*",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.fwChecksum: Invalid value:"))
-
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					FWChecksum: "12345678901234567890-12345678901",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.fwChecksum: Invalid value:"))
-
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					FWChecksum: "1234567890123456789.012345678901",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.fwChecksum: Invalid value:"))
 			})
-		})
 
-		When("DDPChecksum structure is invalid ", func() {
-			It("will fail to create an instance of NodeConfig", func() {
+			It("discovered DDP profile path is not valid", func() {
+				cc := clusterConfigPrototype.DeepCopy()
+				cc.Name = "foobar"
 
+				// Valid Pattern=`ice.*\.xz$`
+				invalidPaths := []string{
+					"/some-path/ice-1.3.37.0.pkg",
+					"/some-path/ice-1.3.37.0.tar.gz",
+					"/some-path/ice-1.3.37.0.zip",
+					"/some-path/ice.",
+				}
+
+				for _, path := range invalidPaths {
+					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
+						DiscoveredDDPPath: path,
+					}
+					err := k8sClient.Create(context.TODO(), cc)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.discoveredDDPPath: Invalid value:"))
+				}
+			})
+
+			It("DDPChecksum structure is invalid", func() {
 				cc := clusterConfigPrototype.DeepCopy()
 				cc.Name = "foobar"
 
 				// Valid Pattern=`^[a-fA-F0-9]{40}$`
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					DDPChecksum: "1234567890123456789012345678901",
+				invalidDDPChecksums := []string{
+					"1234567890123456789012345678901",
+					"1234567890123456789012345678901g",
+					"1234567890123456789012345678901*",
+					"12345678901234567890-12345678901",
+					"1234567890123456789.012345678901",
 				}
-				err := k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.ddpChecksum: Invalid value:"))
 
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					DDPChecksum: "1234567890123456789012345678901g",
+				for _, invinvalidDDPChecksum := range invalidDDPChecksums {
+					cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
+						DDPChecksum: invinvalidDDPChecksum,
+					}
+					err := k8sClient.Create(context.TODO(), cc)
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.ddpChecksum: Invalid value:"))
 				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.ddpChecksum: Invalid value:"))
-
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					DDPChecksum: "1234567890123456789012345678901*",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.ddpChecksum: Invalid value:"))
-
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					DDPChecksum: "12345678901234567890-12345678901",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.ddpChecksum: Invalid value:"))
-
-				cc.Spec.DeviceConfig = ethernetv1.DeviceConfig{
-					DDPChecksum: "1234567890123456789.012345678901",
-				}
-				err = k8sClient.Create(context.TODO(), cc)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("spec.deviceConfig.ddpChecksum: Invalid value:"))
 			})
 		})
 

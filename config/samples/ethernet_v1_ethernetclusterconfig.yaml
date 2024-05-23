@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 ---
 apiVersion: ethernet.intel.com/v1
@@ -11,7 +11,8 @@ spec:
   nodeSelectors:
     kubernetes.io/hostname: sample-node-name
   deviceSelector:
-    pciAddress: 0000:18:00.0
+    pciAddresses:
+      - 0000:18:00.0
   deviceConfig:
     fwURL: "http://ice-cache.default.svc.cluster.local/E810_NVMUpdatePackage_v4_40_Linux.tar.gz"
     fwChecksum: 7ee4eb3761af27dfd1fe032e7a23cfde49eaf4b0

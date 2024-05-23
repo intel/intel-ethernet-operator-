@@ -1,32 +1,31 @@
 ```text
 SPDX-License-Identifier: Apache-2.0
-Copyright (c) 2020-2023 Intel Corporation
+Copyright (c) 2020-2024 Intel Corporation
 ```
 
-# Install OOT (out of tree) ICE driver on OCP nodes
+# Install OOT (out of tree) ICE driver on OCP nodes (E810 only)
 
 ## Prerequisites
 
-> Note: This guide was prepared and tested on environment using DCI to set up OCP.
+> Note: This guide was prepared and tested on OCP 4.13.9.
 
-* OCP cluster 4.12.21
-* DCI configured to interact with above OCP cluster, podman installed (see note above).
-* DCI agent is a privileged user (see note above).
+* OCP cluster 4.13.9 `(any OCP version supported by KMM Operator should work, but steps in this guide may require adjustments)`
 * Redhat account with right subscription for Redhat registry access
-* Internal OCP image registry is setup and configured and exposed for external access
-* External image registry and its access credentials
+* External image registry and OCP is able to access it `(you can skip this step and use internal OCP registry of which configuration is included in this guide)`
 
-## SSH into cluster (or OCP Controller node)
+## SSH into cluster
 
 ```shell
-$ ssh -i <path_to_key>  dci-openshift-agent@<ip>
+$ ssh -i <path_to_key> core@<ip>
 # or
 $ oc debug node/<node_name>
 ```
 
-## Install [Kernel Module Management Operator](https://openshift-kmm.netlify.app/documentation/install/)
+## Install [Kernel Module Management Operator](https://docs.openshift.com/container-platform/4.13/hardware_enablement/kmm-kernel-module-management.html)
 
-Install KMM either from OperatorHub or from CLI using following command.
+Install KMM either from OperatorHub or from CLI using following commands.
+
+Create and apply `yaml` file containing Resources needed for installation.
 
 ```shell
 $ vi kmm.yml
@@ -51,183 +50,235 @@ metadata:
   name: kernel-module-management
   namespace: openshift-kmm
 spec:
-  channel: release-1.0
+  channel: stable
   installPlanApproval: Automatic
   name: kernel-module-management
   source: redhat-operators
   sourceNamespace: openshift-marketplace
-  startingCSV: kernel-module-management.v1.0.0
 ```
 
 ```shell
 $ oc apply -f kmm.yml
 ```
 
-Or just run the following to deploy the bleeding edge version:
-
-```shell
-$ oc apply -k https://github.com/rh-ecosystem-edge/kernel-module-management/config/default
-```
-
-**Warning**, OpenShift versions below 4.12 might require additional steps, see [this documentation](https://openshift-kmm.netlify.app/documentation/install/#openshift-versions-below-412)
-
 ### Verify that KMM is running in the cluster
 
 ```shell
 $ oc get pods -n openshift-kmm
-NAME                                                   READY   STATUS    RESTARTS   AGE
-kmm-operator-controller-manager-6cff95565b-tnqwl       2/2     Running   0          10m
+NAME                                              READY   STATUS    RESTARTS   AGE
+kmm-operator-controller-manager-9b546d464-ghv8v   2/2     Running   0          65s
 ```
 
 ### Get Redhat image pull secret from Redhat subscription
 
-Go to [Pull secret](https://console.redhat.com/openshift/install/pull-secret) page on Redhat OpenShift cluster manager site and download the pull secrete file. Save it on on file in accessible on client machine. Assumed it is stored in `./rht_auth.json` file. You will need to log in with your RH account.
-Copy the secret to clipboard or save to a file.
-Either way create the secret file on dci-agent.
+Go to [Pull secret](https://console.redhat.com/openshift/install/pull-secret) page on Redhat OpenShift cluster manager
+site and download the pull secret file. You will need to log in with your RH account. Copy the secret to clipboard or
+save to a file. Either way create the secret file on client machine. Let's assume it is stored in `./rht_auth.json`
+file.
 
 ```shell
-$ vi ./rht_auth.json #copied from clipboard or file
+$ vi ./rht_auth.json # copied from clipboard or file
 ```
 
 Find out the right driver toolkit image needed for the cluster:
-> Note: It is important to provide right cluster info - in case too old version is provided the latest kernel headers may not be located in the toolkit image.
+> Note: It is important to provide right cluster info - in case incorrect version is provided, the latest kernel headers
+may not be located in the toolkit image.
 
 ```shell
-$ oc adm release info 4.12.21 --image-for=driver-toolkit
+$ oc adm release info 4.13.9 --image-for=driver-toolkit
 quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:<some-version>
 ```
 
-Pull this image locally on client machine using Podman and the authfile `./rht_auth.json` downloaded in previous step and export as variable.
-`podman pull --authfile=<path to secret>  <output from above release info for driver toolkit>`
+Pull this image locally on client machine using Podman with the authfile `./rht_auth.json` downloaded in previous step.
 
 ```shell
 $ podman pull --authfile=./rht_auth.json quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:<some-version>
-$ export OPENSHIFT_SECRET_FILE=./rht_auth.json
 ```
 
-### Prepare Internal registry
+### Prepare image registry
 
-#### Configure registry (Optional)
+> Important: To proceed with OOT ICE driver installation, image registry to which OCP cluster has access, needs to be
+available. If you already have such registry configured, be it public (like [quay.io](<https://quay.io>)) or private,
+you may use it and skip next, optional step. If not, you either need to configure access to existing external registry
+or use OCP internal registry. Steps to configure internal registry can be found below.
 
-Configuring the registry as per <https://docs.openshift.com/container-platform/4.12/registry/configuring_registry_storage/configuring-registry-storage-baremetal.html>
+#### Configure internal registry (optional)
+
+Configuring the registry as per
+<https://docs.openshift.com/container-platform/4.13/registry/configuring_registry_storage/configuring-registry-storage-baremetal.html>
 
 ```shell
 $ oc patch configs.imageregistry.operator.openshift.io cluster --type merge --patch '{"spec":{"managementState":"Managed"}}'
 ```
 
-> Note: "emptyDir" type of storage is ephemeral - in an event of a node reboot all image cache will be lost. [See following guide for more info](https://docs.openshift.com/container-platform/4.9/registry/configuring_registry_storage/configuring-registry-storage-baremetal.html)
+> Note: "emptyDir" type of storage is ephemeral - in an event of a node reboot all image cache will be lost.
+[See following guide for more info](https://docs.openshift.com/container-platform/4.13/registry/configuring_registry_storage/configuring-registry-storage-baremetal.html)
 
 ```shell
 $ oc patch configs.imageregistry.operator.openshift.io cluster --type merge --patch '{"spec":{"storage":{"emptyDir":{}}}}'
 ```
 
+Verify if internal registry pod is available.
+
 ```shell
-$ oc get pods -n openshift-image-registry                                                                  NAME                                              READY   STATUS      RESTARTS   AGE
-cluster-image-registry-operator-bb55889d7-hrck2   1/1     Running     0          3d3h
-image-pruner-27319680--1-tgfvf                    0/1     Completed   0          2d16h
-image-pruner-27321120--1-fs9vt                    0/1     Completed   0          40h
-image-pruner-27322560--1-cz827                    0/1     Completed   0          16h
-image-registry-84849ff4cb-76gpb                   1/1     Running     0          40s <--------- This one
-node-ca-4lb6f                                     1/1     Running     12         21d
-node-ca-9bcvk                                     1/1     Running     1          21d
-node-ca-cw4gf                                     1/1     Running     1          21d
-node-ca-fxxhb                                     1/1     Running     1          21d
-node-ca-gs4hr                                     1/1     Running     5          21d
-node-ca-tnh99                                     1/1     Running     1          21d
+$ oc get pods -n openshift-image-registry
+NAME                                               READY   STATUS      RESTARTS   AGE
+cluster-image-registry-operator-6c4b6696f4-dpr4s   1/1     Running     42         69d
+image-pruner-28327680-bjlcp                        0/1     Completed   0          2d12h
+image-pruner-28329120-h7vz7                        0/1     Completed   0          36h
+image-pruner-28330560-hlk65                        0/1     Completed   0          12h
+image-registry-58fb5d86cc-6wzcj                    1/1     Running     18         49d <--------- This one
+node-ca-zpr6k                                      1/1     Running     42         69d
 ```
 
-#### Expose registry externally (Optional)
-
-Exposing the registry: <https://docs.openshift.com/container-platform/4.12/registry/securing-exposing-registry.html>
+Login to internal registry to ensure it is working properly.
 
 ```shell
-$ oc patch configs.imageregistry.operator.openshift.io/cluster --patch '{"spec":{"defaultRoute":true}}' --type=merge
-```
-
-```shell
-$ export HOST=$(oc get route default-route -n openshift-image-registry --template='{{ .spec.host }}')
-```
-
-```shell
-$ oc get secret -n openshift-ingress  router-certs-default -o go-template='{{index .data "tls.crt"}}' | base64 -d | sudo tee /etc/pki/ca-trust/source/anchors/${HOST}.crt  > /dev/null
-```
-
-```shell
-$ sudo update-ca-trust enable
+$ sudo podman login -u kubeadmin -p $(oc whoami -t) image-registry.openshift-image-registry.svc:5000
+Login Succeeded!
 ```
 
 ### Prepare driver source code image
 
-Create new project
-
-```shell
-$ oc adm new-project oot-driver
-```
-
-```shell
-$ export INTERNAL_REGISTRY=default-route-openshift-image-registry.apps.dciokd.metalkube.org
-$ export EXTERNAL_REGISTRY=<MY.EXTERNAL.REGISTRY.URL>/<PEROJECT>/<REPO>
-$ oc login -u admin
-$ podman login -u kubeadmin -p $(oc whoami -t) $INTERNAL_REGISTRY
-$ podman login -u <YOUR USER NAME> $EXTERNAL_REGISTRY 
-```
-
-Once successfully logged in to the external registry the credentials will be stored by Podman in `$XDG_RUNTIME_DIR/containers/auth.json` file (e.g. if you are are logged in as root on client machine this will be in /run/user/0/containers/auth.json)
-
-```shell
-$ export AUTH_FILE=/run/user/1000/containers/auth.json
-```
-
-Create your ICE OOT Dockerfile, provide the target kernel version, ICE version and possibly replace the URL.
-The first base image should be the driver toolkit you got by running `oc adm release info 4.12.21 --image-for=driver-toolkit`.
+Create your ICE OOT Dockerfile, replace the target (OCP node) kernel version, ICE version and URL. The first base image
+should be the driver toolkit you got by running `oc adm release info 4.13.9 --image-for=driver-toolkit`. You can get
+kernel version of OCP nodes by executing `oc get nodes -o wide`. If you are working behind proxy, don't forget proxy
+related settings.
 
 ```dockerfile
 FROM <driver-toolkit> as builder
 
-ARG KERNEL_VERSION=4.18.0-372.58.1.el8_6.x86_64
-ARG ICE_VERSION=1.11.14
-ENV http_proxy http://proxy-dmz.intel.com:911
-ENV https_proxy http://proxy-dmz.intel.com:911
+ENV HTTP_PROXY <your-proxy>
+ENV HTTPS_PROXY <your-proxy>
+
 WORKDIR /usr/src
-RUN ["wget", "https://downloadmirror.intel.com/772530/ice-${ICE_VERSION}.tar.gz"]
-RUN ["tar","-xvf", "ice-${ICE_VERSION}.tar.gz"]
-WORKDIR /usr/src/ice-${ICE_VERSION}/src
+RUN ["curl", "-X", "GET", "https://downloadmirror.intel.com/789309/ice-1.12.7.tar.gz", "--output", "ice-1.12.7.tar.gz"]
+RUN ["tar","-xvf", "ice-1.12.7.tar.gz"]
+WORKDIR /usr/src/ice-1.12.7/src
 RUN ["make", "install"]
 
 FROM registry.redhat.io/ubi9/ubi-minimal
 
-ARG KERNEL_VERSION=4.18.0-372.58.1.el8_6.x86_64
-RUN mkdir -p /opt/lib/modules/${KERNEL_VERSION}/
-COPY --from=builder /usr/lib/modules/${KERNEL_VERSION}/updates/drivers/net/ethernet/intel/ice/ice.ko /opt/lib/modules/${KERNEL_VERSION}/
-RUN ls  /opt/lib/modules/${KERNEL_VERSION}
-RUN depmod -b /opt ${KERNEL_VERSION}
+ENV HTTP_PROXY <your-proxy>
+ENV HTTPS_PROXY <your-proxy>
+
+RUN microdnf install kmod -y
+
+RUN mkdir -p /opt/lib/modules/<kernel-version>/
+COPY --from=builder /usr/lib/modules/<kernel-version>/updates/drivers/net/ethernet/intel/ice/ice.ko /opt/lib/modules/<kernel-version>/
+RUN ls /opt/lib/modules/<kernel-version>
+
+RUN depmod -b /opt <kernel-version>
 ```
 
-Build and push source container to internal registry:
+Build and push source container to your registry. This might be your preconfigured external registry or internal
+registry configured in previous steps.
 
 ```shell
-$ podman build -t INTERNAL_REGISTRY/PROJECT/kmm-ice-driver:<kernel-version> .
-$ podman push INTERNAL_REGISTRY/PROJECT/kmm-ice-driver:<kernel-version> 
+$ podman build -t <your-registry>/openshift-kmm/kmm-ice-driver:<kernel-version> .
+$ podman push <your-registry>/openshift-kmm/kmm-ice-driver:<kernel-version>
+```
+
+If you are getting the following error while pushing to internal registry
+
+```text
+Error: trying to reuse blob sha256:c9ac8ed59ad94403e08b349f8fda48ca4a120e90f550186208a4218662062577 at destination: checking whether a blob sha256:c9ac8ed59ad94403e08b349f8fda48ca4a120e90f550186208a4218662062577 exists in image-registry.openshift-image-registry.svc:5000/openshift-kmm/kmm-ice-driver: authentication required
+```
+
+create authentication file for `image-registry.openshift-image-registry.svc:5000`.
+
+First create base64 encoded authentication string.
+
+```shell
+$ echo -n "kubeadmin:$(oc whoami -t)" | base64 -w 0
+```
+
+Then create `auth.json` file with following content
+
+```json
+{
+  "auths": {
+    "image-registry.openshift-image-registry.svc:5000": {
+     "auth": "<base64_authentication_string>"
+    }
+  }
+}
+```
+
+Push image again with following command
+
+```shell
+sudo podman push --authfile=auth.json image-registry.openshift-image-registry.svc:5000/openshift-kmm/kmm-ice-driver:5.14.0-284.25.1.el9_2.x86_64
+```
+
+### Unload in-tree ICE module from node
+
+On some systems `irdma` module might be present and that module uses `ice` module as a dependency resulting in failure
+of `ice` unloading procedure. Process of unloading `irdma` before `ice` could be performed manually or on boot using
+systemd service.
+
+> :warning: There is known issue in `irdma` module dependencies file that could cause unload of `i40e` driver together
+> with `irdma` module. To avoid it always use `rmmod` instead of `modprobe -r` as `rmmod` does not unload dependencies.
+
+If `irdma` module is loaded, unload it first.
+
+Either manually.
+
+```shell
+$ sudo rmmod irdma
+```
+
+Or by using systemd (MachineConfig that will create respective systemd service on nodes)
+
+```yaml
+---
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: worker # select role here
+  name: unload-irdma-on-boot
+spec:
+  config:
+    ignition:
+      version: 3.2.0
+    systemd:
+      units:
+        - contents: |
+            [Unit]
+            Description=irdma unload on boot
+            # Start after the network is up
+            Wants=network-online.target
+            After=network-online.target
+            # Also after docker.service (no effect on systems without docker)
+            After=docker.service
+            # Before kubelet.service (no effect on systems without kubernetes)
+            Before=kubelet.service
+            [Service]
+            Type=oneshot
+            TimeoutStartSec=25m
+            RemainAfterExit=true
+            ExecStart=/usr/bin/bash rmmod irdma
+            StandardOutput=journal+console
+            [Install]
+            WantedBy=default.target
+          enabled: true
+          name: "irdma-driver-unload.service"
 ```
 
 ### Create KMM CR
 
-First, we need to create pull secret for external registry in oot-driver namespace so that KMMO can push images in there.
+Copy and edit the below CR resource before applying it, you can find possible values with annotations
+[here](https://docs.openshift.com/container-platform/4.13/hardware_enablement/kmm-kernel-module-management.html).
 
 ```shell
-$ oc -n oot-driver create secret generic external-registry --from-file=.dockerconfigjson=/run/user/1000/containers/auth.json --type=kubernetes.io/dockerconfigjson
+$ vi kmm-module.yaml
 ```
 
-Copy and edit the below CR resource before applying it, you can find possible values with annotations [here](https://openshift-kmm.netlify.app/documentation/deploy_kmod/#example-resource).
-
-```shell
-$ vim kmm-module.yaml
-```
-
-`selector` is the label for nodes you want the driver deployed on
-`regexp` is the regex which should match the kernel versions of nodes you want the driver deployed on
-`containerImage` is the image name as it appears in the internal registry
-`moduleName` is the name of your kernel module, it has to be ice for this module
+* `selector` is the label for nodes you want the driver deployed on
+* `regexp` is the regex which should match the kernel versions of nodes you want the driver deployed on
+* `containerImage` is the image name as it appears in your registry
+* `moduleName` is the name of your kernel module, it has to be ice for this module
 
 ```yaml
 ---
@@ -241,50 +292,54 @@ spec:
     container:
       modprobe:
         moduleName: ice
+      inTreeModuleToRemove: ice
       kernelMappings:
-        - regexp: "4.18.0-372.58.1.el8_6.x86_64"
-          containerImage: "image-registry.openshift-image-registry.svc/oot-driver/kmm-ice-driver:4.18.0-372.58.1.el8_6.x86_64"
+        - regexp: "<kernel-version>"
+          containerImage: "<your-registry>/openshift-kmm/kmm-ice-driver:<kernel-version>"
   selector:
     node-role.kubernetes.io/worker: ""
 ```
 
-Create the special resource
+> Note: To load different version of ice module, first old version of it needs to be unloaded. KMMO supports unloading
+> of old module, but when the ModuleLoader pod is terminated, there is a limitation that the old module won't be loaded
+> again.
+
+Create the `Module` Resource
 
 ```shell
 $ oc create -f kmm-module.yaml
 ```
 
-Once the above KMMO CR is created it will start BuildConfig.
+Once the above KMMO CR is created, new pod/pods will appear.
 
 ```shell
-$ oc get -n openshift-kmm pod
-NAME                    READY   STATUS             RESTARTS   AGE
-ice-tkrzc-rtxks         1/1     Running            0          8m
+oc get pods -n openshift-kmm
+NAME                                              READY   STATUS    RESTARTS   AGE
+ice-x4mcp-2tzkr                                   1/1     Running   0          6s
+kmm-operator-controller-manager-9b546d464-ghv8v   2/2     Running   0          3h10m
 ```
 
 You can now see the KMM manager logs and deployment of a DaemonSet targeting a node in the cluster.
 
 ```shell
-$ oc logs -n openshift-kmm kmm-operator-controller-manager-549d9dbc84-f2rls
-manager I0713 13:48:35.939340       1 module_reconciler.go:346] kmm "msg"="creating new driver container DS" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKin
-d"="Module" "image"={"build":null,"containerImage":"image-registry.openshift-image-registry.svc:5000/kmm-ice-driver:4.18.0-372.58.1.el8_6.x86_64","literal":"","registryTLS":null,"regexp":"4.18.0-372.58.1.el8_6.x86_64"} "kernel version"
-="4.18.0-372.58.1.el8_6.x86_64" "name"="ice" "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
-manager I0713 13:48:35.957326       1 warning_handler.go:65] kmm/KubeAPIWarningLogger "msg"="would violate PodSecurity \"restricted:latest\": seLinuxOptions (container \"module-loader\" set forbidden securityContext.seLinuxOptions: typ
-e \"spc_t\"), unrestricted capabilities (container \"module-loader\" must set securityContext.capabilities.drop=[\"ALL\"]; container \"module-loader\" must not include \"SYS_MODULE\" in securityContext.capabilities.add), restricted vol
-ume types (volume \"node-lib-modules\" uses restricted volume type \"hostPath\"), runAsNonRoot != true (pod or container \"module-loader\" must set securityContext.runAsNonRoot=true), runAsUser=0 (container \"module-loader\" must not s
-et runAsUser=0), seccompProfile (pod or container \"module-loader\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
-manager I0713 13:48:35.957405       1 module_reconciler.go:358] kmm "msg"="Reconciled Driver Container" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind"="M
-odule" "name"="ice-tkrzc" "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d" "result"="created"
-manager I0713 13:48:35.957439       1 module_reconciler.go:174] kmm "msg"="Handle device plugin" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind"="Module"
-"name"="ice" "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
-manager I0713 13:48:35.957457       1 module_reconciler.go:180] kmm "msg"="Run garbage collection" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind"="Module
-" "name"="ice" "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
-manager I0713 13:48:35.957477       1 module_reconciler.go:407] kmm "msg"="Garbage-collected DaemonSets" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind"="
-Module" "name"="ice" "names"=[] "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
-manager I0713 13:48:35.957494       1 module_reconciler.go:415] kmm "msg"="Garbage-collected Build objects" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind
-"="Module" "name"="ice" "names"=null "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
-manager I0713 13:48:35.957532       1 module_reconciler.go:423] kmm "msg"="Garbage-collected Sign objects" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind"
-="Module" "name"="ice" "names"=[] "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
-manager I0713 13:48:35.962995       1 module_reconciler.go:191] kmm "msg"="Reconcile loop finished successfully" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controlle
-rKind"="Module" "name"="ice" "namespace"="openshift-kmm" "reconcileID"="c0f582bf-e2b7-4acd-9c17-10ee798f313d"
+$ oc logs -n openshift-kmm kmm-operator-controller-manager-549d9dbc84-f2rl
+...
+15:17:38.849520       1 module_reconciler.go:359] kmm "msg"="creating new driver container DS" "Module"={"name":"ice","namespace":"openshift-kmm"} "controller"="Module" "controllerGroup"="kmm.sigs.x-k8s.io" "controllerKind"="Module" "image"="image-registry.openshift-image-registry.svc:5000/openshift-kmm/kmm-ice-driver:5.14.0-284.25.1.el9_2.x86_64" "kernel version"="5.14.0-284.25.1.el9_2.x86_64" "name"="ice" "namespace"="openshift-kmm" "reconcileID"="78946ce7-6e73-46fc-9ee6-7b76adcfec6e" "version"=""
+...
+```
+
+You can verify if ICE driver has been changed to OOT by executing
+
+```shell
+$ ethtool -i enp24s0 # name of any E810 NIC on the node, replace according to your environment
+driver: ice
+version: 1.12.7
+firmware-version: 4.40 0x8001beb1 1.3492.0
+expansion-rom-version:
+bus-info: 0000:18:00.0
+supports-statistics: yes
+supports-test: yes
+supports-eeprom-access: yes
+supports-register-dump: yes
+supports-priv-flags: yes
 ```

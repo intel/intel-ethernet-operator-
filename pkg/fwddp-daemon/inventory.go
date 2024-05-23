@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package daemon
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"regexp"
@@ -25,6 +27,8 @@ const (
 var (
 	ethtoolRegex = regexp.MustCompile(`^([a-z-]+?)(?:\s*:\s)(.+)$`)
 	devlinkRegex = regexp.MustCompile(`^\s+([\w\.]+) (.+)$`)
+	cvlKeyRegex  = regexp.MustCompile(`(?i)^e810.*$`)
+	fvlKeyRegex  = regexp.MustCompile(`(?i)^[a-z]{0,3}710.*$`)
 )
 
 var getPCIDevices = func() ([]*ghw.PCIDevice, error) {
@@ -58,20 +62,35 @@ var execDevlink = func(pciAddr string) ([]byte, error) {
 	return exec.Command("devlink", "dev", "info", devName).CombinedOutput()
 }
 
-func isDeviceSupported(d *pci.Device) bool {
+func IsCvlKey(key string) bool {
+	return cvlKeyRegex.MatchString(key)
+}
+
+func IsFvlKey(key string) bool {
+	return fvlKeyRegex.MatchString(key)
+}
+
+func getDeviceSupportedOptions(d *pci.Device) (deviceSupported bool, ddpSupported bool) {
+	deviceSupported = false
+	ddpSupported = false
 	if d == nil {
-		return false
+		return
 	}
 
-	for _, supported := range *compatibilityMap {
+	for key, supported := range *compatibilityMap {
 		if supported.VendorID == d.Vendor.ID &&
 			supported.Class == d.Class.ID &&
 			supported.SubClass == d.Subclass.ID &&
 			supported.DeviceID == d.Product.ID {
-			return true
+			deviceSupported = true
+
+			if IsCvlKey(key) {
+				ddpSupported = true
+			}
+			break
 		}
 	}
-	return false
+	return
 }
 
 func GetInventory(log logr.Logger) ([]ethernetv1.Device, error) {
@@ -83,7 +102,8 @@ func GetInventory(log logr.Logger) ([]ethernetv1.Device, error) {
 	var devices []ethernetv1.Device
 
 	for _, pciDevice := range pciDevices {
-		if isDeviceSupported(pciDevice) {
+		deviceSupported, ddpSupported := getDeviceSupportedOptions(pciDevice)
+		if deviceSupported {
 			d := ethernetv1.Device{
 				PCIAddress: pciDevice.Address,
 				Name:       pciDevice.Product.Name,
@@ -91,12 +111,27 @@ func GetInventory(log logr.Logger) ([]ethernetv1.Device, error) {
 				DeviceID:   pciDevice.Product.ID,
 			}
 			addNetInfo(log, &d)
-			addDDPInfo(log, &d)
+			if ddpSupported {
+				addDDPInfo(log, &d)
+			} else {
+				log.Info("Device does not support DDP profiling", "Device Name", d.Name)
+			}
 			devices = append(devices, d)
 		}
 	}
 
 	return devices, nil
+}
+
+func GetDDPsFromHost(log logr.Logger) []string {
+	// see .volumeMounts in assets/200-daemon.yaml as to why this path was used
+	rootDirs := []string{"/host/discover-ddp"}
+	log.Info("Discovering DDP packages located on host", "dirs", rootDirs)
+
+	discoveredDDPs := discoverDDPs(rootDirs, log)
+	log.Info("DDP profiles found on host", "count", len(discoveredDDPs))
+
+	return discoveredDDPs
 }
 
 func addNetInfo(log logr.Logger, device *ethernetv1.Device) {
@@ -142,6 +177,50 @@ func addNetInfo(log logr.Logger, device *ethernetv1.Device) {
 
 }
 
+func discoverDDPs(directories []string, log logr.Logger) []string {
+	regexpPattern := regexp.MustCompile(`^ice.*\.xz$`)
+
+	discoveredDDPs := make([]string, 0, 10)
+	for _, dir := range directories {
+		err := filepath.WalkDir(dir, func(path string, info os.DirEntry, err error) error {
+			if err != nil {
+				// continue traversing directory in case of error
+				return err
+			}
+			// skip if file is symlink
+			if info.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if regexpPattern.MatchString(info.Name()) && !info.IsDir() {
+				ok, err := isXZArchive(path)
+				if err != nil {
+					return err
+				}
+				if ok {
+					discoveredDDPs = append(discoveredDDPs, path)
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			log.Error(err, "error while traversing directories during DDP discovering")
+		}
+	}
+
+	return discoveredDDPs
+}
+
+// Check file header to ensure it's XZ archive
+func isXZArchive(filename string) (bool, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return false, err
+	}
+
+	return len(data) >= 6 && string(data[:6]) == "\xfd7zXZ\x00", nil
+}
+
 func addDDPInfo(log logr.Logger, device *ethernetv1.Device) {
 	out, err := execDevlink(device.PCIAddress)
 	if err != nil {
@@ -168,11 +247,11 @@ func addDDPInfo(log logr.Logger, device *ethernetv1.Device) {
 func splitPCIAddr(pciAddr string, log logr.Logger) (string, string, string, string, error) {
 	pciAddrList := strings.Split(pciAddr, ":")
 	if len(pciAddrList) != 3 {
-		return "", "", "", "", fmt.Errorf("PCI Address %v format issue, cannot split on colon :", pciAddr)
+		return "", "", "", "", fmt.Errorf("pci Address %v format issue, cannot split on colon ':'", pciAddr)
 	}
 	busDevice := strings.Split(pciAddrList[2], ".")
 	if len(busDevice) != 2 {
-		return "", "", "", "", fmt.Errorf("Bus and device %v format issue, cannot split on dot .", pciAddrList[2])
+		return "", "", "", "", fmt.Errorf("bus and device %v format issue, cannot split on dot '.'", pciAddrList[2])
 	}
 
 	return pciAddrList[0], pciAddrList[1], busDevice[0], busDevice[1], nil

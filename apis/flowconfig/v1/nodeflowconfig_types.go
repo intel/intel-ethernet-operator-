@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -29,18 +29,18 @@ type NodeFlowConfigStatus struct {
 	PortInfo []PortsInformation `json:"portInfo"`
 	// Last applied rules
 	//+operator-sdk:csv:customresourcedefinitions:type=status
-	Rules      []*FlowRules   `json:"rules,omitempty"`
+	Rules []*FlowRules `json:"rules,omitempty"`
 	//+operator-sdk:csv:customresourcedefinitions:type=status
 	SyncStatus SyncStatusType `json:"syncStatus,omitempty"`
 	//+operator-sdk:csv:customresourcedefinitions:type=status
-	SyncMsg    string         `json:"syncMsg,omitempty"`
+	SyncMsg string `json:"syncMsg,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 
 // NodeFlowConfig is the Schema for the nodeflowconfigs API
-//+operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,flowconfig-daemon}}
+// +operator-sdk:csv:customresourcedefinitions:resources={{Pod,v1,flowconfig-daemon}}
 type NodeFlowConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

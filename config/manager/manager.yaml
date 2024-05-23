@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 apiVersion: v1
 kind: Namespace
@@ -67,8 +67,10 @@ spec:
             cpu: 100m
             memory: 200Mi
         env:
-        - name: ETHERNET_NODE_LABEL
-          value: "ethernet.intel.com/intel-ethernet-present"
+        - name: ETHERNET_CVL_NODE_LABEL
+          value: "ethernet.intel.com/intel-ethernet-cvl-present"
+        - name: ETHERNET_FVL_NODE_LABEL
+          value: "ethernet.intel.com/intel-ethernet-fvl-present"
         - name: ETHERNET_NODE_LABELER_IMAGE
           value: $ETHERNET_NODE_LABELER_IMAGE
         - name: ETHERNET_DAEMON_IMAGE

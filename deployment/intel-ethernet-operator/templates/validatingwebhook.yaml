@@ -1,0 +1,63 @@
+{{/*
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+*/}}
+
+{{- if .Values.webhookServerConfiguration.enable -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "intel-ethernet-operator.validatingWebhookConfiguration" . }}
+  annotations:
+    {{ if .Values.webhookServerConfiguration.useCertManager -}}
+    cert-manager.io/inject-ca-from: {{- printf " %s/%s" .Release.Namespace (include "intel-ethernet-operator.certificate" .) }}
+    {{- end }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: {{ include "intel-ethernet-operator.webhookService" . }}
+      namespace: {{ .Release.Namespace }}
+      path: /validate-flowconfig-intel-com-v1-clusterflowconfig
+    {{ if not .Values.webhookServerConfiguration.useCertManager -}}
+    caBundle: {{ .Files.Get .Values.webhookServerConfiguration.caCertFilepath | b64enc | quote }}
+    {{- end }}
+  failurePolicy: Fail
+  name: vclusterflowconfig.kb.io
+  rules:
+  - apiGroups:
+    - flowconfig.intel.com
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - clusterflowconfigs
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: {{ include "intel-ethernet-operator.webhookService" . }}
+      namespace: {{ .Release.Namespace }}
+      path: /validate-flowconfig-intel-com-v1-nodeflowconfig
+    {{ if not .Values.webhookServerConfiguration.useCertManager -}}
+    caBundle: {{ .Files.Get .Values.webhookServerConfiguration.caCertFilepath | b64enc | quote }}
+    {{- end }}
+  failurePolicy: Fail
+  name: vnodeflowconfig.kb.io
+  rules:
+  - apiGroups:
+    - flowconfig.intel.com
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - nodeflowconfigs
+  sideEffects: None
+{{- end }}

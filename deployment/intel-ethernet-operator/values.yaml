@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+
+# Default values for intel-ethernet-operator.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# If your cluster is behind proxy and you want to use external fwURL and ddpURL
+# in EthernetClusterConfig, configure proxy settings.
+proxy:
+  httpProxy: 
+  httpsProxy:
+  noProxy:
+
+image:
+  repository:
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag:
+
+# Settings of the Validating Webhook that verifies NodeFlowConfig and ClusterFlowConfig CRs.
+# You can use CertManager to provision certs for webhook (recommended).
+#
+# If you don't want to use CertManager, you can provide certificates yourself. Specify
+# location of the files containing server certificate, server key and CA certificate that
+# was used to sign server certificate. Note that certificate files should be located in the
+# same directory as this (values.yaml) file.
+#
+# mTLS for Webhook communication is optional. If you decide to use it, either provide
+# CA certificate that was used for signing client certificate or leave that variable
+# blank. If you leave it blank, cluster general CA will be used.
+#
+# You can disable Validation Webhook completely, although it's highly not recommended if you
+# want to use Flow Configuration.
+webhookServerConfiguration:
+  enable: true
+  useCertManager: true
+  
+  # Define these variables if you don't want to use CertManager, otherwise leave them blank
+  serverCertFilepath:
+  serverKeyFilepath:
+  caCertFilepath:
+
+  # Not supported on OCP
+  mTLSWebhook:
+    enable: false
+    clientCaFilepath:
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 200Mi
+  requests:
+    cpu: 100m
+    memory: 200Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package daemon
 
@@ -22,7 +22,6 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -44,7 +43,7 @@ func (d *TestData) GetNamespacedName() types.NamespacedName {
 func initTestData() TestData {
 	return TestData{
 		NodeConfig: ethernetv1.EthernetNodeConfig{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test",
 				Namespace: "default",
 			},
@@ -60,9 +59,9 @@ func initTestData() TestData {
 			},
 		},
 		Node: core.Node{
-			ObjectMeta: v1.ObjectMeta{
+			ObjectMeta: metav1.ObjectMeta{
 				Name:   "test",
-				Labels: map[string]string{"fpga.ethernet.com/intel-ethernet-present": ""},
+				Labels: map[string]string{"fpga.ethernet.com/intel-ethernet-cvl-present": ""},
 			},
 		},
 		Inventory: []ethernetv1.Device{
@@ -95,6 +94,9 @@ func initReconciler(toBeInitialized *NodeConfigReconciler, nodeName, namespace s
 	return nil
 }
 
+const discoveredDDPPath = "testdata/ice-test-archive.pkg.xz"
+const ddpDir = "ddpdir"
+
 var data = TestData{}
 
 var _ = Describe("DaemonTests", func() {
@@ -112,14 +114,21 @@ var _ = Describe("DaemonTests", func() {
 		untarFile = func(srcPath string, dstPath string, log logr.Logger) error {
 			return nil
 		}
-		unpackDDPArchive = func(srcPath string, dstPath string, log logr.Logger) error {
+		unpackDDPZipArchive = func(srcPath string, dstPath string, log logr.Logger) error {
 			return nil
 		}
 		nvmupdateExec = func(cmd *exec.Cmd, log logr.Logger) error {
 			return nil
 		}
+		getDDPsFromHost = func(_ logr.Logger) []string {
+			return []string{discoveredDDPPath}
+		}
+		createDdpPaths = func(_ string) (string, string) {
+			return ddpDir, ddpDir
+		}
 
-		artifactsFolder = "./workdir/nvmupdate/"
+		artifactsFolder = "./testdir/intel-ethernet-operator/"
+		firmwareFolder = "./testdir/intel-ethernet-operator/"
 	})
 
 	var _ = Context("Reconciler", func() {
@@ -146,7 +155,6 @@ var _ = Describe("DaemonTests", func() {
 		})
 
 		var _ = It("will not create a new node config reconciler, because of invalid config file", func() {
-
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 
 			cset, err := clientset.NewForConfig(config)
@@ -225,12 +233,26 @@ var _ = Describe("DaemonTests", func() {
 		})
 
 		var _ = It("will update condition to UpdateFailed if no matching devices were found", func() {
-
-			findFw = func(localpath string) (string, error) { return localpath, nil }
+			defer os.RemoveAll(artifactsFolder)
 
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
+
+			data.Inventory[0].PCIAddress = "0000:00:00.1"
+
+			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
+				Expect(err).ToNot(HaveOccurred())
+
+				return nil
+			}
+			findNvm = func(localpath string) (string, error) { return localpath, nil }
+
 			Expect(initReconciler(reconciler, data.NodeConfig.Name, data.NodeConfig.Namespace)).To(Succeed())
+
+			nvmupdateExec = func(cmd *exec.Cmd, log logr.Logger) error {
+				return fmt.Errorf("FAILING NVME UPDATE ON PURPOSE")
+			}
 
 			_, err := reconciler.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{
 				Namespace: data.NodeConfig.Namespace,
@@ -244,7 +266,7 @@ var _ = Describe("DaemonTests", func() {
 			Expect(nodeConfigs.Items[0].Status.Conditions).To(HaveLen(1))
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Reason).To(Equal(string(UpdateFailed)))
-			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal("failed to get MAC for device 0000:00:00.1. Device not found"))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal("FAILING NVME UPDATE ON PURPOSE"))
 		})
 
 		var _ = It("will update condition to UpdateFailed if not able to download firmware", func() {
@@ -285,10 +307,9 @@ var _ = Describe("DaemonTests", func() {
 
 			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
 
-				updateDir := path.Join(artifactsFolder, data.Inventory[0].PCIAddress)
-				updatePath := updateResultPath(updateDir)
+				updatePath := updateResultPath(artifactsFolder)
 
-				err := os.MkdirAll(updateDir, 0777)
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
 				Expect(err).ToNot(HaveOccurred())
 
 				tmpfile, err := os.OpenFile(updatePath, os.O_RDWR|os.O_CREATE, 0777)
@@ -307,7 +328,7 @@ var _ = Describe("DaemonTests", func() {
 			}
 
 			wasRebootCalled := false
-			findFw = func(localpath string) (string, error) { return localpath, nil }
+			findNvm = func(localpath string) (string, error) { return localpath, nil }
 
 			execCmd = func(args []string, log logr.Logger) (string, error) {
 				for _, part := range args {
@@ -347,10 +368,9 @@ var _ = Describe("DaemonTests", func() {
 
 			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
 
-				updateDir := path.Join(artifactsFolder, data.Inventory[0].PCIAddress)
-				updatePath := updateResultPath(updateDir)
+				updatePath := updateResultPath(artifactsFolder)
 
-				err := os.MkdirAll(updateDir, 0777)
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
 				Expect(err).ToNot(HaveOccurred())
 
 				tmpfile, err := os.OpenFile(updatePath, os.O_RDWR|os.O_CREATE, 0777)
@@ -369,7 +389,6 @@ var _ = Describe("DaemonTests", func() {
 			}
 
 			wasRebootCalled := false
-
 			execCmd = func(args []string, log logr.Logger) (string, error) {
 				for _, part := range args {
 					if strings.Contains(part, "reboot") {
@@ -386,7 +405,6 @@ var _ = Describe("DaemonTests", func() {
 				Name:      data.NodeConfig.Name,
 			}})
 			Expect(err).ToNot(HaveOccurred())
-
 			Expect(wasRebootCalled).To(Equal(false))
 
 			nodeConfigs := &ethernetv1.EthernetNodeConfigList{}
@@ -408,10 +426,9 @@ var _ = Describe("DaemonTests", func() {
 
 			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
 
-				updateDir := path.Join(artifactsFolder, data.Inventory[0].PCIAddress)
-				updatePath := updateResultPath(updateDir)
+				updatePath := updateResultPath(artifactsFolder)
 
-				err := os.MkdirAll(updateDir, 0777)
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
 				Expect(err).ToNot(HaveOccurred())
 
 				tmpfile, err := os.OpenFile(updatePath, os.O_RDWR|os.O_CREATE, 0777)
@@ -490,13 +507,22 @@ var _ = Describe("DaemonTests", func() {
 		})
 
 		var _ = It("will update condition to UpdateFailed if firmware updater binary fails", func() {
+			defer os.RemoveAll(artifactsFolder)
+
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
 
 			data.Inventory[0].PCIAddress = "0000:00:00.1"
 
+			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
+				Expect(err).ToNot(HaveOccurred())
+
+				return nil
+			}
+
 			nvmupdateExec = func(cmd *exec.Cmd, log logr.Logger) error {
-				return fmt.Errorf("FAILING NVME UPDATE BY PURPOSE")
+				return fmt.Errorf("FAILING NVME UPDATE ON PURPOSE")
 			}
 
 			Expect(initReconciler(reconciler, data.NodeConfig.Name, data.NodeConfig.Namespace)).To(Succeed())
@@ -514,14 +540,23 @@ var _ = Describe("DaemonTests", func() {
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Reason).To(Equal(string(UpdateFailed)))
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(SatisfyAny(
-				ContainSubstring("FAILING NVME UPDATE BY PURPOSE")))
+				ContainSubstring("FAILING NVME UPDATE ON PURPOSE")))
 		})
 
 		var _ = It("will update condition to UpdateFailed if firmware update fails", func() {
+			defer os.RemoveAll(artifactsFolder)
+
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
 
 			data.Inventory[0].PCIAddress = "0000:00:00.1"
+
+			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
+				Expect(err).ToNot(HaveOccurred())
+
+				return nil
+			}
 
 			fwErr := gerrors.New("unable to update firmware")
 			nvmupdateExec = func(cmd *exec.Cmd, log logr.Logger) error {
@@ -551,6 +586,16 @@ var _ = Describe("DaemonTests", func() {
 
 			data.Inventory[0].PCIAddress = "0000:00:00.1"
 
+			wasRebootCalled := false
+			execCmd = func(args []string, log logr.Logger) (string, error) {
+				for _, part := range args {
+					if strings.Contains(part, "reboot") {
+						wasRebootCalled = true
+					}
+				}
+				return "", nil
+			}
+
 			rootAttr := &syscall.SysProcAttr{
 				Credential: &syscall.Credential{Uid: 0, Gid: 0},
 			}
@@ -562,10 +607,9 @@ var _ = Describe("DaemonTests", func() {
 
 			downloadFile = func(localpath, url, checksum string, client *http.Client) error {
 
-				updateDir := path.Join(artifactsFolder, data.Inventory[0].PCIAddress)
-				updatePath := updateResultPath(updateDir)
+				updatePath := updateResultPath(artifactsFolder)
 
-				err := os.MkdirAll(updateDir, 0777)
+				err := os.MkdirAll(path.Join(artifactsFolder, data.Inventory[0].PCIAddress, "E810"), 0777)
 				Expect(err).ToNot(HaveOccurred())
 
 				tmpfile, err := os.OpenFile(updatePath, os.O_RDWR|os.O_CREATE, 0777)
@@ -589,9 +633,24 @@ var _ = Describe("DaemonTests", func() {
 				Namespace: data.NodeConfig.Namespace,
 				Name:      data.NodeConfig.Name,
 			}})
-			Expect(err).ToNot(HaveOccurred())
 
+			Expect(err).ToNot(HaveOccurred())
+			Expect(wasRebootCalled).To(Equal(false))
 			nodeConfigs := &ethernetv1.EthernetNodeConfigList{}
+			Expect(k8sClient.List(context.TODO(), nodeConfigs)).To(Succeed())
+			Expect(nodeConfigs.Items).To(HaveLen(1))
+			Expect(nodeConfigs.Items[0].Status.Conditions).To(HaveLen(1))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Status).To(Equal(metav1.ConditionTrue))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Reason).To(Equal(string(UpdateSucceeded)))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal("Updated successfully"))
+
+			_, err = reconciler.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{
+				Namespace: data.NodeConfig.Namespace,
+				Name:      data.NodeConfig.Name,
+			}})
+
+			Expect(err).ToNot(HaveOccurred())
+			nodeConfigs = &ethernetv1.EthernetNodeConfigList{}
 			Expect(k8sClient.List(context.TODO(), nodeConfigs)).To(Succeed())
 			Expect(nodeConfigs.Items).To(HaveLen(1))
 			Expect(nodeConfigs.Items[0].Status.Conditions).To(HaveLen(1))
@@ -600,52 +659,7 @@ var _ = Describe("DaemonTests", func() {
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal("Updated successfully"))
 		})
 
-		var _ = It("will update update condition to UpdateFailed because of no MAC", func() {
-			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
-			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
-
-			data.Inventory[0].Firmware.MAC = ""
-			data.Inventory[0].PCIAddress = "0000:00:00.1"
-
-			rootAttr := &syscall.SysProcAttr{
-				Credential: &syscall.Credential{Uid: 0, Gid: 0},
-			}
-			nvmupdateExec = func(cmd *exec.Cmd, log logr.Logger) error {
-				Expect(cmd.SysProcAttr).To(Equal(rootAttr))
-				Expect(cmd.Dir).To(Equal(path.Join(artifactsFolder, data.NodeConfig.Spec.Config[0].PCIAddress)))
-				return nil
-			}
-
-			invCnt := 2
-
-			getInventory = func(_ logr.Logger) ([]ethernetv1.Device, error) {
-				if invCnt > 0 {
-					invCnt--
-					return data.Inventory, nil
-				} else {
-					return nil, nil
-				}
-			}
-
-			Expect(initReconciler(reconciler, data.NodeConfig.Name, data.NodeConfig.Namespace)).To(Succeed())
-
-			_, err := reconciler.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{
-				Namespace: data.NodeConfig.Namespace,
-				Name:      data.NodeConfig.Name,
-			}})
-			Expect(err).ToNot(HaveOccurred())
-
-			nodeConfigs := &ethernetv1.EthernetNodeConfigList{}
-			Expect(k8sClient.List(context.TODO(), nodeConfigs)).To(Succeed())
-			Expect(nodeConfigs.Items).To(HaveLen(1))
-			Expect(nodeConfigs.Items[0].Status.Conditions).To(HaveLen(1))
-			Expect(nodeConfigs.Items[0].Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
-			Expect(nodeConfigs.Items[0].Status.Conditions[0].Reason).To(Equal(string(UpdateFailed)))
-			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(ContainSubstring("failed to get MAC for device 0000:00:00.1. Device not found"))
-		})
-
 		var _ = It("if FWUrl is empty (empty device config) then FW update is skipped and status updated to NotRequested", func() {
-
 			data.NodeConfig.Spec.Config[0].DeviceConfig.FWURL = ""
 
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
@@ -679,50 +693,19 @@ var _ = Describe("DaemonTests", func() {
 		})
 
 		var _ = It("will fail because of PCIAddress not matching pattern", func() {
-
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 
 			// Valid pattern: ^[a-fA-F0-9]{2,4}:[a-fA-F0-9]{2}:[01][a-fA-F0-9]\.[0-7]$
+			invalidPciAddresses := []string{"0:00:00.1", "0000:00:00.a", "0:00:00", "0:00:00",
+				"0000:00:20.1", "0000:00:0.1", "0000:0:00.1", "0000:00:00.*",
+			}
 
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0:00:00.1"
-			err := k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0000:00:00.a"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0:00:00"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0:00:00"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0000:00:20.1"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0000:00:0.1"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0000:0:00.1"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
-
-			data.NodeConfig.Spec.Config[0].PCIAddress = "0000:00:00.*"
-			err = k8sClient.Create(context.TODO(), &data.NodeConfig)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
+			for _, invalidPciAddress := range invalidPciAddresses {
+				data.NodeConfig.Spec.Config[0].PCIAddress = invalidPciAddress
+				err := k8sClient.Create(context.TODO(), &data.NodeConfig)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("spec.config[0].PCIAddress: Invalid value:"))
+			}
 		})
 
 		var _ = It("will update condition to UpdateFailed if not able to download DDP", func() {
@@ -756,6 +739,31 @@ var _ = Describe("DaemonTests", func() {
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal(downloadErr.Error()))
 		})
 
+		var _ = It("will update condition to UpdateFailed if not able to find discovered DDP name", func() {
+			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
+
+			data.NodeConfig.Spec.Config[0].DeviceConfig.FWURL = ""
+			data.NodeConfig.Spec.Config[0].DeviceConfig.DiscoveredDDPPath = "/non-existent-path/ice-profile.pkg.xz"
+			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
+
+			Expect(initReconciler(reconciler, data.NodeConfig.Name, data.NodeConfig.Namespace)).To(Succeed())
+
+			_, err := reconciler.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{
+				Namespace: data.NodeConfig.Namespace,
+				Name:      data.NodeConfig.Name,
+			}})
+			Expect(err).ToNot(HaveOccurred())
+
+			nodeConfigs := &ethernetv1.EthernetNodeConfigList{}
+			Expect(k8sClient.List(context.TODO(), nodeConfigs)).To(Succeed())
+			Expect(nodeConfigs.Items[0].Status.Conditions).To(HaveLen(1))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Status).To(Equal(metav1.ConditionFalse))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Reason).To(Equal(string(UpdateFailed)))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).
+				To(Equal(fmt.Sprintf("provided DDP path: '%s' not found",
+					data.NodeConfig.Spec.Config[0].DeviceConfig.DiscoveredDDPPath)))
+		})
+
 		var _ = It("will update condition to UpdateFailed if not able to unpack DDP", func() {
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 
@@ -766,7 +774,7 @@ var _ = Describe("DaemonTests", func() {
 			data.Inventory[0].PCIAddress = "0000:00:00.1"
 
 			unzipErr := gerrors.New("unable to unzip")
-			unpackDDPArchive = func(srcPath string, dstPath string, log logr.Logger) error {
+			unpackDDPZipArchive = func(srcPath string, dstPath string, log logr.Logger) error {
 				return unzipErr
 			}
 
@@ -813,18 +821,61 @@ var _ = Describe("DaemonTests", func() {
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(ContainSubstring("expected to find exactly 1 file ending with '.pkg', but found 0"))
 		})
 
-		var _ = It("will force reboot node on successful DDP update", func() {
+		var _ = It("will force reboot node on successful filesystem DDP update", func() {
 			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
 
 			data.NodeConfig.Spec.Config[0].DeviceConfig.FWURL = ""
-			data.NodeConfig.Spec.Config[0].DeviceConfig.DDPURL = "http://testddpurl"
+			data.NodeConfig.Spec.Config[0].DeviceConfig.DiscoveredDDPPath = discoveredDDPPath
+
 			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
 
 			data.Inventory[0].PCIAddress = "0000:00:00.1"
 
 			Expect(initReconciler(reconciler, data.NodeConfig.Name, data.NodeConfig.Namespace)).To(Succeed())
 
-			tempFile, err := os.CreateTemp("/tmp", "daemontest")
+			wasRebootCalled := false
+			execCmd = func(args []string, log logr.Logger) (string, error) {
+				for _, part := range args {
+					if strings.Contains(part, "reboot") {
+						wasRebootCalled = true
+					}
+					if strings.Contains(part, "Device Serial") {
+						return "devId\n", nil
+					}
+				}
+				return "", nil
+			}
+
+			_, err := reconciler.Reconcile(context.TODO(), ctrl.Request{NamespacedName: types.NamespacedName{
+				Namespace: data.NodeConfig.Namespace,
+				Name:      data.NodeConfig.Name,
+			}})
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(wasRebootCalled).To(Equal(true))
+
+			nodeConfigs := &ethernetv1.EthernetNodeConfigList{}
+			Expect(k8sClient.List(context.TODO(), nodeConfigs)).To(Succeed())
+			Expect(nodeConfigs.Items).To(HaveLen(1))
+			Expect(nodeConfigs.Items[0].Status.Conditions).To(HaveLen(1))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Reason).To(Equal(string(UpdatePostUpdateReboot)))
+			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal("Post-update node reboot"))
+		})
+
+		var _ = It("will fall back URL when discovered DDP name is not found, will force reboot node on successful URL DDP update", func() {
+			Expect(k8sClient.Create(context.TODO(), &data.Node)).To(Succeed())
+
+			data.NodeConfig.Spec.Config[0].DeviceConfig.FWURL = ""
+			data.NodeConfig.Spec.Config[0].DeviceConfig.DDPURL = "http://testddpurl"
+			data.NodeConfig.Spec.Config[0].DeviceConfig.DiscoveredDDPPath = "/non-existent-path/ice-profile.pkg.xz"
+
+			Expect(k8sClient.Create(context.TODO(), &data.NodeConfig)).To(Succeed())
+
+			data.Inventory[0].PCIAddress = "0000:00:00.1"
+
+			Expect(initReconciler(reconciler, data.NodeConfig.Name, data.NodeConfig.Namespace)).To(Succeed())
+
+			tempFile, err := os.CreateTemp(ddpDir, "daemontest")
 			Expect(err).To(Succeed())
 			defer tempFile.Close()
 
@@ -833,7 +884,6 @@ var _ = Describe("DaemonTests", func() {
 			}
 
 			wasRebootCalled := false
-
 			execCmd = func(args []string, log logr.Logger) (string, error) {
 				for _, part := range args {
 					if strings.Contains(part, "reboot") {
@@ -862,4 +912,5 @@ var _ = Describe("DaemonTests", func() {
 			Expect(nodeConfigs.Items[0].Status.Conditions[0].Message).To(Equal("Post-update node reboot"))
 		})
 	})
+
 })

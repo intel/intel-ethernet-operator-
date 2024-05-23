@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package main
 
@@ -26,9 +26,12 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	ethernetv1 "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/apis/ethernet/v1"
 	flowconfigv1 "github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/apis/flowconfig/v1"
@@ -97,20 +100,43 @@ func main() {
 		}
 	}
 
+	webhookOpts := webhook.Options{}
+	webhookOpts.Port = 9443
+	webhookOpts.TLSOpts = []func(config *tls.Config){
+		func(config *tls.Config) {
+			config.MinVersion = tls.VersionTLS13
+		},
+	}
+	if os.Getenv("ENABLE_WEBHOOK_MTLS") == "true" {
+		setupLog.Info("enabling mTLS for webhook server")
+
+		webhookOpts.CertDir = "/tmp/k8s-webhook-server/serving-certs/"
+		caPath := "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+		if _, err := os.Stat("/etc/ieo-webhook/pki/ca.crt"); err == nil {
+			caPath = "/etc/ieo-webhook/pki/ca.crt"
+		}
+		webhookOpts.ClientCAName = path.Join("../../../", caPath)
+		webhookOpts.TLSOpts = append(webhookOpts.TLSOpts,
+			func(config *tls.Config) {
+				config.ClientAuth = tls.RequireAndVerifyClientCert
+			},
+		)
+	}
+
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
+		Scheme: scheme,
+		Metrics: server.Options{
+			BindAddress: metricsAddr,
+		},
+		WebhookServer:          webhook.NewServer(webhookOpts),
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "8ee6d2ed.intel.com",
-		Namespace:              fwddp_manager.NAMESPACE,
-		TLSOpts: []func(config *tls.Config){
-			func(config *tls.Config) {
-				if os.Getenv("ENABLE_WEBHOOK_MTLS") == "true" {
-					config.ClientAuth = tls.RequireAndVerifyClientCert
-				}
-			},
+		NewCache: func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
+			opts.DefaultNamespaces = map[string]cache.Config{
+				fwddp_manager.NAMESPACE: {},
+			}
+			return cache.New(config, opts)
 		},
 	})
 	if err != nil {
@@ -125,21 +151,6 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EthernetClusterConfig")
 		os.Exit(1)
-	}
-
-	// Set min TLS for webhook server
-	mgr.GetWebhookServer().TLSMinVersion = "1.3"
-
-	if os.Getenv("ENABLE_WEBHOOK_MTLS") == "true" {
-		setupLog.Info("enabling mTLS for webhook server")
-		mgr.GetWebhookServer().CertDir = "/tmp/k8s-webhook-server/serving-certs/"
-
-		caPath := "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-		_, err := os.Stat("/etc/ieo-webhook/pki/ca.crt")
-		if err == nil {
-			caPath = "/etc/ieo-webhook/pki/ca.crt"
-		}
-		mgr.GetWebhookServer().ClientCAName = path.Join("../../../", caPath)
 	}
 
 	// to disable webhook(e.g. when testing locally) run it as 'make run ENABLE_WEBHOOKS=false'
@@ -191,9 +202,6 @@ func main() {
 		assetsToDeploy := []assets.Asset{
 			{ConfigMapName: "labeler-config", Path: "assets/100-labeler.yaml"},
 			{ConfigMapName: "daemon-config", Path: "assets/200-daemon.yaml", BlockingReadiness: assets.ReadinessPollConfig{Retries: 30, Delay: 20 * time.Second}},
-		}
-		if !utils.IsK8sDeployment() {
-			assetsToDeploy = append(assetsToDeploy, assets.Asset{ConfigMapName: "machine-config", Path: "assets/300-machine-config.yaml"})
 		}
 
 		assetsManager := &assets.Manager{

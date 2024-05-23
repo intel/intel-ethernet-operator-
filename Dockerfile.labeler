@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
-FROM golang:alpine3.18 as builder
+FROM docker.io/golang:alpine3.19 as builder
 
 WORKDIR /workspace
 COPY go.mod go.sum ./
@@ -11,12 +11,16 @@ COPY cmd cmd/
 COPY pkg pkg/
 COPY apis apis/
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o node_labeler cmd/labeler/main.go
-
-RUN apk update && apk add --no-cache curl
+RUN apk add --no-cache curl
 RUN curl https://pci-ids.ucw.cz/v2.2/pci.ids.gz -o pci.ids.gz && gunzip pci.ids.gz
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.2-5
+# Build
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on \
+    go build -trimpath -mod=readonly -gcflags="all=-spectre=all -N -l" \
+    -asmflags="all=-spectre=all" -ldflags="all=-s -w" -a -o \
+    node_labeler cmd/labeler/main.go
+
+FROM docker.io/redhat/ubi9-micro:9.3-15
 
 ARG VERSION
 ### Required OpenShift Labels
@@ -34,5 +38,11 @@ COPY --from=builder /workspace/pci.ids /usr/share/misc/pci.ids
 USER 1001
 WORKDIR /labeler-workspace
 COPY --from=builder /workspace/node_labeler .
+
+USER root
+RUN mkdir /licenses
+COPY LICENSE /licenses/LICENSE.txt
+RUN chown 1001 /licenses
+USER 1001
 
 ENTRYPOINT ["bash", "-c", "/labeler-workspace/node_labeler && sleep infinity"]

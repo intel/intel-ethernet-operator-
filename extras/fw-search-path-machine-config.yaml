@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+
+# Set firmware search path on worker nodes to /var/lib/firmware/
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: worker
+  name: customize-fw-search-path-worker
+spec:
+  kernelArguments:
+    - "firmware_class.path=/var/lib/firmware/"
+
+---
+# Set firmware search path on master nodes to /var/lib/firmware/
+apiVersion: machineconfiguration.openshift.io/v1
+kind: MachineConfig
+metadata:
+  labels:
+    machineconfiguration.openshift.io/role: master
+  name: customize-fw-search-path-master
+spec:
+  kernelArguments:
+    - "firmware_class.path=/var/lib/firmware/"

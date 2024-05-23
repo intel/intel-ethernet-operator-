@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
 import (
 	"fmt"
 
-	"github.com/golang/protobuf/ptypes/any"
 	"github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/pkg/flowconfig/rpc/v1/flow"
 	"github.com/intel-collab/applications.orchestration.operators.intel-ethernet-operator/pkg/flowconfig/utils"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func validateFlowPatterns(patterns []*FlowItem) error {
@@ -75,7 +75,7 @@ func validateRteFlowItem(item *FlowItem) error {
 	return nil
 }
 
-func validateItem(itemType flow.RteFlowItemType, itemName string, spec, item *any.Any) error {
+func validateItem(itemType flow.RteFlowItemType, itemName string, spec, item *anypb.Any) error {
 	if spec == nil && itemName != "spec" {
 		return fmt.Errorf("%s spec must be specified", itemType)
 	}

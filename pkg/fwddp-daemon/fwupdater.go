@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package daemon
 
@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	findFw        = findFwExec
+	findNvm       = findNvmExec
 	nvmupdateExec = utils.RunExecWithLog
 )
 
@@ -61,7 +61,31 @@ func (f *fwUpdater) prepareFirmware(config ethernetv1.DeviceNodeConfig) (string,
 		return "", err
 	}
 
-	return findFw(targetPath)
+	log.V(2).Info("Move firmware binaries and config files to hostPath", "hostPath", firmwareFolder)
+	// Copy all files (config files, firmware binaries, miscellaneous) except nvmupdate binary.
+	// This is done to avoid running binary from hostPath which is bad security practice.
+	var cardSeries string
+	if _, err := os.Stat(filepath.Join(targetPath, "E810")); err == nil {
+		cardSeries = "E810"
+	} else if _, err := os.Stat(filepath.Join(targetPath, "700Series")); err == nil {
+		cardSeries = "700Series"
+	} else {
+		return "", fmt.Errorf("expected to find unpacked CVL or FVL nvmupdate directory, but nothing found")
+	}
+
+	pattern := filepath.Join(targetPath, cardSeries, "Linux_x64", "*.*")
+	filesToMove, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", err
+	}
+	for _, filePath := range filesToMove {
+		newPath := filepath.Join(firmwareFolder, filepath.Base(filePath))
+		if err := utils.CopyFile(filePath, newPath); err != nil {
+			return "", err
+		}
+	}
+
+	return findNvm(targetPath)
 }
 
 func (f *fwUpdater) handleFWUpdate(pciAddr, fwPath, fwUpdateParam string) (bool, error) {
@@ -83,7 +107,7 @@ func (f *fwUpdater) handleFWUpdate(pciAddr, fwPath, fwUpdateParam string) (bool,
 	if returnCode == 50 || returnCode == 51 {
 		reboot = true
 	} else {
-		reboot, err = isRebootRequired(updateResultPath(fwPath))
+		reboot, err = isRebootRequired(updateResultPath(firmwareFolder))
 	}
 
 	if err != nil {
@@ -93,6 +117,7 @@ func (f *fwUpdater) handleFWUpdate(pciAddr, fwPath, fwUpdateParam string) (bool,
 		log.V(4).Info("Node reboot required to complete firmware update", "device", pciAddr)
 		rebootRequired = true
 	}
+
 	return rebootRequired, nil
 }
 
@@ -137,20 +162,18 @@ func (f *fwUpdater) updateFirmware(pciAddr, fwPath, fwUpdateParam string) (int, 
 	log.V(2).Info("PCI Addr splitted and converted successfully", "domain",
 		domain_dec, "bus", bus_dec)
 
-	configPath := nvmupdate64eCfgPath(fwPath)
-	resultPath := updateResultPath(fwPath)
 	pciLocation := fmt.Sprintf("%02d:%03d", domain_dec, bus_dec)
 
 	log.V(2).Info("Starting Firmware Update", "pciLocation", pciLocation,
-		"configPath", configPath, "resultPath", resultPath)
+		"firmwareFolder", firmwareFolder, "resultFile", updateResultPath(firmwareFolder))
 
 	var cmd *exec.Cmd
 	if fwUpdateParam != "" {
-		cmd = exec.Command(nvmupdate64e, "-u", "-location", pciLocation, "-c",
-			configPath, "-o", resultPath, "-l", fwUpdateParam)
+		cmd = exec.Command(nvmupdate64e, "-u", "-location", pciLocation, "-a",
+			firmwareFolder, "-o", updateOutFile, "-l", fwUpdateParam)
 	} else {
-		cmd = exec.Command(nvmupdate64e, "-u", "-location", pciLocation, "-c",
-			configPath, "-o", resultPath, "-l")
+		cmd = exec.Command(nvmupdate64e, "-u", "-location", pciLocation, "-a",
+			firmwareFolder, "-o", updateOutFile, "-l")
 	}
 
 	cmd.SysProcAttr = rootAttr
@@ -184,7 +207,7 @@ func (f *fwUpdater) updateFirmware(pciAddr, fwPath, fwUpdateParam string) (int, 
 	return 0, nil
 }
 
-func findFwExec(targetPath string) (string, error) {
+func findNvmExec(targetPath string) (string, error) {
 	var fwPaths []string
 	walkFunction := func(path string, info os.FileInfo, err error) error {
 		if strings.HasSuffix(info.Name(), "nvmupdate64e") && isExecutable(info) {
@@ -202,6 +225,5 @@ func findFwExec(targetPath string) (string, error) {
 	return fwPaths[0], err
 }
 
-func nvmupdate64eCfgPath(p string) string { return filepath.Join(p, "nvmupdate.cfg") }
-func updateResultPath(p string) string    { return filepath.Join(p, updateOutFile) }
-func isExecutable(info os.FileInfo) bool  { return info.Mode()&0100 != 0 }
+func updateResultPath(p string) string   { return filepath.Join(p, updateOutFile) }
+func isExecutable(info os.FileInfo) bool { return info.Mode()&0100 != 0 }

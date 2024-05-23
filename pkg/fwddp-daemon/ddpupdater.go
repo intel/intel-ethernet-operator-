@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package daemon
 
@@ -16,6 +16,7 @@ import (
 )
 
 var findDdp = findDdpProfile
+var createDdpPaths = utils.CreateFullDdpPaths
 
 type ddpUpdater struct {
 	log        logr.Logger
@@ -53,7 +54,7 @@ func (d *ddpUpdater) updateDDP(pciAddr, ddpProfilePath string) error {
 	// create both intel/ice/ddp and updates/intel/ice/ddp
 	// DDP paths for compatibility with different drivers
 	intelPath, updatesPath := d.getDdpUpdatePaths()
-	
+
 	for _, path := range []string{intelPath, updatesPath} {
 		if err := os.MkdirAll(path, 0600); err != nil {
 			return err
@@ -62,7 +63,7 @@ func (d *ddpUpdater) updateDDP(pciAddr, ddpProfilePath string) error {
 		target := filepath.Join(path, "ice-"+devId+".pkg")
 		log.V(4).Info("Copying", "source", ddpProfilePath, "target", target)
 
-		if err :=  utils.CopyFile(ddpProfilePath, target); err != nil {
+		if err := utils.CopyFile(ddpProfilePath, target); err != nil {
 			return err
 		}
 	}
@@ -70,21 +71,50 @@ func (d *ddpUpdater) updateDDP(pciAddr, ddpProfilePath string) error {
 	return nil
 }
 
-func (d *ddpUpdater) prepareDDP(config ethernetv1.DeviceNodeConfig) (string, error) {
+func (d *ddpUpdater) prepareDDP(config ethernetv1.DeviceNodeConfig, discoveredDDPs []string) (string, error) {
 	log := d.log.WithName("prepareDDP")
 
-	if config.DeviceConfig.DDPURL == "" {
+	// filesystem path to DDP profile always take priority over URL path
+	packageToLoad := ""
+	if config.DeviceConfig.DiscoveredDDPPath != "" {
+		for _, ddpPath := range discoveredDDPs {
+			if ddpPath == config.DeviceConfig.DiscoveredDDPPath {
+				log.V(4).Info("Provided path matched to discovered path")
+				packageToLoad = ddpPath
+				break
+			}
+		}
+		if packageToLoad == "" {
+			if config.DeviceConfig.DDPURL == "" {
+				return "", fmt.Errorf("provided DDP path: '%s' not found", config.DeviceConfig.DiscoveredDDPPath)
+			}
+			log.V(4).Info("Provided path not found, fall back to ddpURL")
+		}
+	}
+
+	if config.DeviceConfig.DDPURL == "" && packageToLoad == "" {
 		log.V(4).Info("Empty DDPURL")
 		return "", nil
 	}
 
+	// start preparation process
 	targetPath := filepath.Join(artifactsFolder, config.PCIAddress)
-
 	err := utils.CreateFolder(targetPath, log)
 	if err != nil {
 		return "", err
 	}
 
+	// extract from XZ archive located on host
+	if packageToLoad != "" {
+		fullPath := filepath.Join(targetPath, strings.TrimSuffix(filepath.Base(packageToLoad), ".xz"))
+		log.V(4).Info("Extracting DDP from archive", "archive", packageToLoad)
+		if err := unpackDDPXZArchive(packageToLoad, fullPath, log); err != nil {
+			return "", err
+		}
+		return findDdp(targetPath)
+	}
+
+	// download from provided URL
 	fullPath := filepath.Join(targetPath, filepath.Base(config.DeviceConfig.DDPURL))
 	log.V(4).Info("Downloading", "url", config.DeviceConfig.DDPURL, "dstPath", fullPath)
 	err = downloadFile(fullPath, config.DeviceConfig.DDPURL, config.DeviceConfig.DDPChecksum, d.httpClient)
@@ -95,8 +125,7 @@ func (d *ddpUpdater) prepareDDP(config ethernetv1.DeviceNodeConfig) (string, err
 	log.V(4).Info("DDP file downloaded - extracting")
 	// XXX so this unpacks into the same directory as the source file
 	// We might add more comments here explaining the mechanics and reasoning
-	err = unpackDDPArchive(fullPath, targetPath, log)
-	if err != nil {
+	if err := unpackDDPZipArchive(fullPath, targetPath, log); err != nil {
 		return "", err
 	}
 
@@ -107,7 +136,7 @@ func (d *ddpUpdater) getDdpUpdatePaths() (string, string) {
 	log := d.log.WithName("getDDPUpdatePath")
 
 	const baseDir = "/lib/firmware/"
-	intelPath, updatesPath := utils.CreateFullDdpPaths(baseDir)
+	intelPath, updatesPath := createDdpPaths(baseDir)
 	log.V(4).Info("Using DDP paths", "path", intelPath, "path", updatesPath)
 
 	return intelPath, updatesPath

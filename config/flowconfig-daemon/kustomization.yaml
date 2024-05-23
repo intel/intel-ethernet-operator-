@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -12,5 +12,8 @@ patchesStrategicMerge:
 - add_volumes.yaml
 images:
 - name: daemon-image
-  newName: intel-ethernet-operator-flowconfig-daemon
-  newTag: 0.0.1
+  newName: ger-is-registry.caas.intel.com/cno/lalrafax/intel-ethernet-operator-flowconfig-daemon
+  newTag: 3.0.2
+- name: dcf-tool
+  newName: ger-is-registry.caas.intel.com/cno/lalrafax/uft
+  newTag: v22.07

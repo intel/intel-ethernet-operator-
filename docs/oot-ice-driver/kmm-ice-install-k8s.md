@@ -1,9 +1,9 @@
 ```text
 SPDX-License-Identifier: Apache-2.0
-Copyright (c) 2020-2023 Intel Corporation
+Copyright (c) 2020-2024 Intel Corporation
 ```
 
-# Install OOT (out of tree) ICE driver on Kubernetes nodes
+# Install OOT (out of tree) ICE driver on Kubernetes nodes (E810 only)
 
 ## Prerequisites
 
@@ -39,8 +39,10 @@ kmm-operator-controller-manager-6cff95565b-tnqwl       2/2     Running   0      
 
 ### Prepare driver source code image
 
-KMMO requires that you build an image, called ModuleLoader image, which will have the .ko file - kernel module, in the /opt directory.
-It also has to have the ``kmod`` utility installed, namely ``modprobe`` and ``sleep`` command. Create your ICE OOT Dockerfile, provide the target kernel version, ICE version and possibly replace the URL. You should also use your target OS as the base images and the equivalent dependencies.
+KMMO requires that you build an image, called ModuleLoader image, which will have the `.ko file` - kernel module, in
+the `/opt` directory. It also has to have the `kmod` utility installed, namely `modprobe` and `sleep` command. Create
+your ICE OOT Dockerfile, provide the target kernel version, ICE version and possibly replace the URL. You should also
+use your target OS as the base images and the equivalent dependencies.
 
 ```dockerfile
 FROM ubuntu as builder
@@ -87,6 +89,45 @@ $ podman build -t <registry>/ice-driver-kernel-module:<kernel-version> .
 $ podman push <registry>/ice-driver-kernel-module:<kernel-version> 
 ```
 
+### Unload in-tree ICE module from node
+
+On some systems `irdma` module might be present and that module uses `ice` module as a dependency resulting in failure
+of `ice` unloading procedure. Process of unloading `irdma` before `ice` could be performed manually or on boot using
+systemd service.
+
+> :warning: There is known issue in `irdma` module dependencies file that could cause unload of `i40e` driver together
+> with `irdma` module. To avoid it always use `rmmod` instead of `modprobe -r` as `rmmod` does not unload dependencies.
+
+If `irdma` module is loaded, unload it first.
+
+Either manually.
+
+```shell
+$ sudo rmmod irdma
+```
+
+Or by creating systemd service on your nodes.
+
+```yaml
+[Unit]
+Description=irdma unload on boot
+# Start after the network is up
+Wants=network-online.target
+After=network-online.target
+# Also after docker.service (no effect on systems without docker)
+After=docker.service
+# Before kubelet.service (no effect on systems without kubernetes)
+Before=kubelet.service
+[Service]
+Type=oneshot
+TimeoutStartSec=25m
+RemainAfterExit=true
+ExecStart=/usr/bin/bash rmmod irdma
+StandardOutput=journal+console
+[Install]
+WantedBy=default.target
+```
+
 ### Create KMM CR
 
 ```shell
@@ -110,7 +151,7 @@ spec:
     container:
       modprobe:
         moduleName: ice
-        inTreeModuleToRemove: ice
+      inTreeModuleToRemove: ice
       kernelMappings:
         - regexp: '5.15.0-73-generic'
           containerImage: <registry>/ice-driver-kernel-module:<kernel-version>
@@ -118,7 +159,9 @@ spec:
     node-role.kubernetes.io/worker: ""
 ```
 
-> Note: To load different version of ice module, first old version of it needs to be unloaded. KMMO supports unloading of old module, but when the ModuleLoader pod is terminated, there is a limitation that the old module won't be loaded again.
+> Note: To load different version of ice module, first old version of it needs to be unloaded. KMMO supports unloading
+> of old module, but when the ModuleLoader pod is terminated, there is a limitation that the old module won't be loaded
+> again.
 
 Create the special resource
 

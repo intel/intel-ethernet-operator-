@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2020-2024 Intel Corporation
+
+name: Security
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  trivy-on-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image_name: ["manager", "daemon", "labeler", "flowconfig-daemon"]
+    env:
+      VERSION: ${{ vars.IEO_VERSION }}
+      IMAGE_REGISTRY: localhost
+    steps:
+      - name: Checkout operator repository
+        uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.image_name }}
+        if: matrix.image_name == 'flowconfig-daemon'
+        run: make TLS_VERIFY=true IMGTOOL=docker docker-build-flowconfig
+
+      - name: Build ${{ matrix.image_name }}
+        if: matrix.image_name != 'flowconfig-daemon'
+        run: make TLS_VERIFY=true IMGTOOL=docker docker-build-${{ matrix.image_name }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: localhost/intel-ethernet-operator-${{ matrix.image_name }}:${{ env.VERSION }}
+          scan-type: image
+          format: table
+          output: trivy-${{ matrix.image_name }}.txt
+          vuln-type: "os,library"
+          severity: "CRITICAL,HIGH,MEDIUM,LOW"
+
+      - name: Upload Trivy results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.image_name }}
+          path: trivy-${{ matrix.image_name }}.txt
+
+  # code-ql github actions cannot be used as we don't have GH Enterprise with Advanced Security
+  code-ql:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout operator repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Set up CodeQL
+        run: |
+          curl -Lo codeql-bundle.tar.gz \
+            https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.15.5/codeql-bundle-linux64.tar.gz
+          tar xzvf codeql-bundle.tar.gz
+          echo "${{ github.workspace }}/codeql" >> $GITHUB_PATH
+
+      - name: Initialize Go database
+        run: codeql database create codeql-db --language=go --source-root .
+
+      - name: Run CodeQL
+        run: codeql database analyze codeql-db/ --format=sarif-latest --output=go-full.sarif
+
+      - name: Upload CodeQL results
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: go-full.sarif

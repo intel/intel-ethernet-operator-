@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
 ---
 apiVersion: ethernet.intel.com/v1
@@ -10,7 +10,7 @@ metadata:
 spec: {}
 status:
   conditions:
-    - lastTransitionTime: "2023-11-14T13:57:06Z"
+    - lastTransitionTime: "2024-11-14T13:57:06Z"
       message: Inventory up to date
       observedGeneration: 1
       reason: NotRequested

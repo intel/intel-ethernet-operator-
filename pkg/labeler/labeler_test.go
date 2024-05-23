@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package labeler
 
@@ -75,25 +75,40 @@ var _ = Describe("Labeler", func() {
 			Expect(len(devices)).ToNot(Equal(0))
 		})
 	})
-	var _ = Describe("findSupportedDevice", func() {
-		var _ = It("will fail if config is not provided", func() {
-			found, err := findSupportedDevice(nil)
-			Expect(err).To(MatchError(ContainSubstring("not provided")))
-			Expect(found).To(Equal(false))
-		})
+	foundDevice := &ghw.PCIDevice{
+		Vendor: &pcidb.Vendor{
+			ID: "0001",
+		},
+		Class: &pcidb.Class{
+			ID: "00",
+		},
+		Subclass: &pcidb.Subclass{
+			ID: "00",
+		},
+		Product: &pcidb.Product{
+			ID: "123",
+		},
+	}
 
+	foundDeviceKey := "E809"
+
+	var _ = Describe("findAllSupportedDevices", func() {
+		var _ = It("will fail if config is not provided", func() {
+			found, err := findAllSupportedDevices(nil)
+			Expect(err).To(MatchError(ContainSubstring("not provided")))
+			Expect(found).To(Equal((map[string]*ghw.PCIDevice)(nil)))
+		})
 		var _ = It("will fail if getPCIDevices fails", func() {
 			getPCIDevices = func() ([]*ghw.PCIDevice, error) { return nil, fmt.Errorf("ErrorStub") }
 
 			supportedDevices := new(utils.SupportedDevices)
 			Expect(utils.LoadSupportedDevices("testdata/devices.json", supportedDevices)).ToNot(HaveOccurred())
 
-			found, err := findSupportedDevice(supportedDevices)
+			found, err := findAllSupportedDevices(supportedDevices)
 			Expect(err).To(HaveOccurred())
-			Expect(found).To(Equal(false))
+			Expect(found).To(Equal((map[string]*ghw.PCIDevice)(nil)))
 		})
-
-		var _ = It("will return false if there is no devices found", func() {
+		var _ = It("will return an empty array if there is no devices found", func() {
 			getPCIDevices = func() ([]*ghw.PCIDevice, error) {
 				return []*ghw.PCIDevice{}, nil
 			}
@@ -101,12 +116,12 @@ var _ = Describe("Labeler", func() {
 			supportedDevices := new(utils.SupportedDevices)
 			Expect(utils.LoadSupportedDevices("testdata/devices.json", supportedDevices)).ToNot(HaveOccurred())
 
-			found, err := findSupportedDevice(supportedDevices)
+			found, err := findAllSupportedDevices(supportedDevices)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(found).To(Equal(false))
+			Expect(found).To(Equal(map[string]*ghw.PCIDevice{}))
 		})
 
-		var _ = It("will return true if there is a device found", func() {
+		var _ = It("will return the found device", func() {
 			getPCIDevices = func() ([]*ghw.PCIDevice, error) {
 				var devices []*ghw.PCIDevice
 				devices = append(devices,
@@ -124,20 +139,7 @@ var _ = Describe("Labeler", func() {
 							ID: "test",
 						},
 					},
-					&ghw.PCIDevice{
-						Vendor: &pcidb.Vendor{
-							ID: "0001",
-						},
-						Class: &pcidb.Class{
-							ID: "00",
-						},
-						Subclass: &pcidb.Subclass{
-							ID: "00",
-						},
-						Product: &pcidb.Product{
-							ID: "123",
-						},
-					},
+					foundDevice,
 				)
 				return devices, nil
 			}
@@ -145,9 +147,60 @@ var _ = Describe("Labeler", func() {
 			supportedDevices := new(utils.SupportedDevices)
 			Expect(utils.LoadSupportedDevices("testdata/devices.json", supportedDevices)).ToNot(HaveOccurred())
 
+			found, err := findAllSupportedDevices(supportedDevices)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(len(found)).To(Equal(1))
+			Expect(found[foundDeviceKey]).To(Equal(foundDevice))
+		})
+
+	})
+
+	var _ = Describe("findSupportedDevice", func() {
+		var tmpFunc func(sd *utils.SupportedDevices) (map[string]*ghw.PCIDevice, error)
+		BeforeEach(func() {
+			tmpFunc = findAllSupportedDevices
+		})
+		AfterEach(func() {
+			findAllSupportedDevices = tmpFunc
+		})
+		var _ = It("will return false if there is no devices found", func() {
+			findAllSupportedDevices = func(sd *utils.SupportedDevices) (map[string]*ghw.PCIDevice, error) {
+				return map[string]*ghw.PCIDevice{}, nil
+			}
+
+			supportedDevices := new(utils.SupportedDevices)
+			Expect(utils.LoadSupportedDevices("testdata/devices.json", supportedDevices)).ToNot(HaveOccurred())
+
+			found, err := findSupportedDevice(supportedDevices)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(found).To(Equal(false))
+		})
+
+		var _ = It("will return true if there is a device found", func() {
+			findAllSupportedDevices = func(sd *utils.SupportedDevices) (map[string]*ghw.PCIDevice, error) {
+				allFoundDevices := map[string]*ghw.PCIDevice{"E809": foundDevice}
+				return allFoundDevices, nil
+			}
+			supportedDevices := new(utils.SupportedDevices)
+			Expect(utils.LoadSupportedDevices("testdata/devices.json", supportedDevices)).ToNot(HaveOccurred())
+
 			found, err := findSupportedDevice(supportedDevices)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(found).To(Equal(true))
+		})
+
+		var _ = It("will return an error if findAllSupportedDevices returns an error", func() {
+			testErrorStr := "test error"
+			findAllSupportedDevices = func(sd *utils.SupportedDevices) (map[string]*ghw.PCIDevice, error) {
+				return map[string]*ghw.PCIDevice{}, fmt.Errorf(testErrorStr)
+			}
+			supportedDevices := new(utils.SupportedDevices)
+			Expect(utils.LoadSupportedDevices("testdata/devices.json", supportedDevices)).ToNot(HaveOccurred())
+
+			_, err := findSupportedDevice(supportedDevices)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal(testErrorStr))
 		})
 	})
 	var _ = Describe("setNodeLabel", func() {
@@ -200,7 +253,8 @@ var _ = Describe("Labeler", func() {
 		})
 		var _ = It("will fail if there is no NODENAME env", func() {
 			_ = os.Unsetenv("NODENAME")
-			Expect(os.Setenv("NODELABEL", "anyNodeLabelValue")).ToNot(HaveOccurred())
+			Expect(os.Setenv("CVLLABEL", "anyNodeLabelValue")).ToNot(HaveOccurred())
+			Expect(os.Setenv("FVLLABEL", "anyNodeLabelValue")).ToNot(HaveOccurred())
 			getPCIDevices = func() ([]*ghw.PCIDevice, error) { return []*ghw.PCIDevice{}, nil }
 			deviceConfig = "testdata/devices.json"
 			Expect(DeviceDiscovery()).To(MatchError(ContainSubstring("nodeName is empty ")))

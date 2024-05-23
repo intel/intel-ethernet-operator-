@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -78,6 +78,7 @@ func encodeHexMacAddress(addr []byte) (uint32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("error parsing mac address: %v", err)
 	}
+
 	return uint32(parseAddr), nil
 }
 

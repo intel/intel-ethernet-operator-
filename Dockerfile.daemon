@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2020-2023 Intel Corporation
+# Copyright (c) 2020-2024 Intel Corporation
 
-FROM golang:alpine3.18 as builder
+FROM docker.io/golang:alpine3.19 as builder
 
 WORKDIR /workspace
-
 COPY go.mod go.sum ./
-
 RUN go mod download
 
 COPY cmd cmd/
@@ -14,26 +12,16 @@ COPY pkg pkg/
 COPY apis apis/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o fwddp_daemon cmd/fwddp-daemon/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on \
+    go build -trimpath -mod=readonly -gcflags="all=-spectre=all -N -l" \
+    -asmflags="all=-spectre=all" -ldflags="all=-s -w" -a -o \
+    fwddp_daemon cmd/fwddp-daemon/main.go
 
-# Install packages in clean filesystem and manually compile latest version of zlib
-FROM registry.access.redhat.com/ubi9/ubi:9.2-489 AS package_installer
-RUN mkdir -p /mnt/rootfs && \
-    yum install --installroot /mnt/rootfs coreutils-single glibc-minimal-langpack ethtool iproute kmod pciutils sed gawk \
-        --releasever 9 --setopt install_weak_deps=false --nodocs -y && \
-    yum --installroot /mnt/rootfs clean all && \
-    rm -rf /mnt/rootfs/var/cache/* /mnt/rootfs/var/log/dnf* /mnt/rootfs/var/log/yum.* && \
-    yum install -y gcc make && \
-    curl -L -o zlib-1.2.13.tar.gz https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz && \
-    tar xzvf zlib-1.2.13.tar.gz
-WORKDIR /zlib-1.2.13
-RUN ./configure && \
-    make test && make install
+FROM docker.io/redhat/ubi9-minimal:9.3-1612
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.2-5
+RUN microdnf install -y ethtool iproute kmod pciutils && microdnf clean all
 
 ARG VERSION
-
 ### Required OpenShift Labels
 LABEL name="Intel Ethernet Operator - daemonset" \
     vendor="Intel Corporation" \
@@ -42,9 +30,8 @@ LABEL name="Intel Ethernet Operator - daemonset" \
     summary="Manages the FW and DPP updates of E810 NICs" \
     description="The daemonset container is responsible for building the nodes inventory and configuring the FW and DDP updates on E810 series NICs"
 
+USER 1001
 WORKDIR /
-COPY --from=package_installer /mnt/rootfs/ /
-COPY --from=package_installer /usr/local/lib/libz.so.1.2.13 /lib64/libz.so.1
 COPY --from=builder /workspace/fwddp_daemon .
 
 USER root

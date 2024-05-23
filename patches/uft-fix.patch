@@ -1,5 +1,5 @@
---- entrypoint.sh	2023-04-27 13:34:45.728759110 +0000
-+++ entrypoint-fix.sh	2023-04-27 13:35:24.300062339 +0000
+--- entrypoint.sh	2024-04-27 13:34:45.728759110 +0000
++++ entrypoint-fix.sh	2024-04-27 13:35:24.300062339 +0000
 @@ -13,11 +13,17 @@
  # See the License for the specific language governing permissions and
  # limitations under the License.

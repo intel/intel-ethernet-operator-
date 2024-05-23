@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package v1
 
@@ -23,6 +23,9 @@ type EthernetNodeConfigSpec struct {
 	// Skips drain process when true; default false. Should be true if operator is running on SNO
 	//+operator-sdk:csv:customresourcedefinitions:type=spec
 	DrainSkip bool `json:"drainSkip,omitempty"`
+	// Set to true to retry update every 5 minutes
+	// Default is set to false - no retries will occur
+	RetryOnFail bool `json:"retryOnFail,omitempty"`
 }
 
 type FirmwareInfo struct {
@@ -52,7 +55,7 @@ type Device struct {
 	// FirmwareInfo contains information about MAC address of card and loaded version of Firmware
 	Firmware FirmwareInfo `json:"firmware"`
 	// DDPInfo contains information about loaded DDP profile
-	DDP DDPInfo `json:"DDP"`
+	DDP DDPInfo `json:"DDP,omitempty"`
 }
 
 // EthernetNodeConfigStatus defines the observed state of EthernetNodeConfig
@@ -60,9 +63,12 @@ type EthernetNodeConfigStatus struct {
 	// Provides information about device update status
 	//+operator-sdk:csv:customresourcedefinitions:type=status
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	// Contains list of supported CLV cards and details about them
+	// Contains list of supported CVL cards and details about them
 	//+operator-sdk:csv:customresourcedefinitions:type=status
 	Devices []Device `json:"devices,omitempty"`
+	// Contains list of DDP profiles packages found on the node
+	//+operator-sdk:csv:customresourcedefinitions:type=status
+	DiscoveredDDPs []string `json:"discoveredDDPs,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -72,7 +78,7 @@ type EthernetNodeConfigStatus struct {
 //+kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="Updated")].message`
 
 // EthernetNodeConfig is the Schema for the ethernetnodeconfigs API
-//+operator-sdk:csv:customresourcedefinitions:resources={{DaemonSet,v1,fwddp-daemon}}
+// +operator-sdk:csv:customresourcedefinitions:resources={{DaemonSet,v1,fwddp-daemon}}
 type EthernetNodeConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

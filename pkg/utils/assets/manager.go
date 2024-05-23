@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package assets
 
@@ -53,7 +53,7 @@ func (m *Manager) buildTemplateVars() (map[string]string, error) {
 			tp[proxy] = ""
 		}
 	}
-	
+
 	fwPath, err := utils.GetFwSearchPath()
 	if err != nil {
 		m.Log.Error(err, "Error getting customized fw search path, using default", "path", fwPath)

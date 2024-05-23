@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2020-2023 Intel Corporation
+// Copyright (c) 2020-2024 Intel Corporation
 
 package drainhelper
 
@@ -65,7 +65,7 @@ func NewDrainHelper(log logr.Logger, cs *clientset.Clientset, nodeName, namespac
 
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      "clv-daemon-lease",
+			Name:      "cvl-daemon-lease",
 			Namespace: namespace,
 		},
 		Client: cs.CoordinationV1(),
@@ -119,7 +119,7 @@ func (dh *DrainHelper) Run(f func(context.Context) bool, drain bool) error {
 	defer func() {
 		// Following mitigation is needed because of the bug in the leader election's release functionality
 		// Release fails because the input (leader election record) is created incomplete (missing fields):
-		// Failed to release lock: Lease.coordination.k8s.io "clv-daemon-lease" is invalid:
+		// Failed to release lock: Lease.coordination.k8s.io "cvl-daemon-lease" is invalid:
 		// ... spec.leaseDurationSeconds: Invalid value: 0: must be greater than 0
 		// When the leader election finishes (Run() ends), we need to clean up the Lease manually.
 		// See: https://github.com/kubernetes/kubernetes/pull/80954
@@ -233,7 +233,7 @@ func (dh *DrainHelper) cordonAndDrain(ctx context.Context) error {
 
 	dh.log.Info("starting drain attempts")
 	if err := wait.ExponentialBackoff(backoff, f); err != nil {
-		if err == wait.ErrWaitTimeout {
+		if wait.Interrupted(err) {
 			dh.log.Error(e, "failed to drain node - timed out")
 			return e
 		}
@@ -266,7 +266,7 @@ func (dh *DrainHelper) Uncordon(ctx context.Context) error {
 
 	dh.log.Info("starting uncordon attempts")
 	if err := wait.ExponentialBackoff(backoff, f); err != nil {
-		if err == wait.ErrWaitTimeout {
+		if wait.Interrupted(err) {
 			dh.log.Error(e, "failed to uncordon node - timed out")
 			return e
 		}
