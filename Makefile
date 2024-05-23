@@ -265,6 +265,10 @@ docker-build-manager: flowconfig-manifests
 docker-build-daemon:
 	$(IMGTOOL) build ${NOCACHE_ARG} --file Dockerfile.daemon --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_DAEMON_IMAGE} ${DOCKERARGS} .
 
+.PHONY: docker-build-daemon-src
+docker-build-daemon-src:
+	$(IMGTOOL) build ${NOCACHE_ARG} --file Dockerfile.daemon-src --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_DAEMON_IMAGE} ${DOCKERARGS} .
+
 .PHONY: docker-build-labeler
 docker-build-labeler:
 	$(IMGTOOL) build ${NOCACHE_ARG} --file Dockerfile.labeler --build-arg=VERSION=$(VERSION) --tag ${ETHERNET_NODE_LABELER_IMAGE} ${DOCKERARGS} .
